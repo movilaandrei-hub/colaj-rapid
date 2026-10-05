@@ -67,3 +67,39 @@ self.addEventListener('fetch', e => {
 });
 `);
 console.log('docs/ built, version ' + version);
+
+// Android app (Capacitor): same page, fonts bundled so it works offline, no service worker or zip library.
+(async () => {
+  const www = path.join(root, 'android-app', 'www'), fontsDir = path.join(www, 'fonts');
+  fs.mkdirSync(fontsDir, { recursive: true });
+  const link = app.match(/<link rel="stylesheet" href="(https:\/\/fonts\.googleapis\.com[^"]+)">/);
+  let page = app.replace(/<script src="https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/jszip[^>]*><\/script>\n?/, '')
+    .replace(/<link rel="preconnect"[^>]*>\n?/g, '');
+  // scripts from jsDelivr are copied into the app
+  for (const m of [...page.matchAll(/<script src="(https:\/\/cdn\.jsdelivr\.net\/npm\/[^"]+)"[^>]*><\/script>/g)]) {
+    try {
+      const file = path.basename(new URL(m[1]).pathname), libDir = path.join(www, 'lib');
+      fs.mkdirSync(libDir, { recursive: true });
+      fs.writeFileSync(path.join(libDir, file), Buffer.from(await (await fetch(m[1])).arrayBuffer()));
+      page = page.replace(m[0], `<script src="lib/${file}"></script>`);
+      console.log('android-app/www: bundled ' + file);
+    } catch (e) { console.warn('script not bundled:', m[1], e.message); }
+  }
+  if (link) {
+    try {
+      const ua = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36';
+      let css = await (await fetch(link[1].replace(/&amp;/g, '&'), { headers: { 'User-Agent': ua } })).text();
+      const urls = [...new Set(css.match(/https:\/\/fonts\.gstatic\.com\/[^)]+/g) || [])];
+      for (const [i, u] of urls.entries()) {
+        const file = `f${i}.woff2`;
+        fs.writeFileSync(path.join(fontsDir, file), Buffer.from(await (await fetch(u)).arrayBuffer()));
+        css = css.split(u).join(file);
+      }
+      fs.writeFileSync(path.join(fontsDir, 'fonts.css'), css);
+      page = page.replace(link[0], '<link rel="stylesheet" href="fonts/fonts.css">');
+      console.log(`android-app/www: ${urls.length} font files bundled`);
+    } catch (e) { console.warn('fonts not bundled (offline?):', e.message); }
+  }
+  fs.writeFileSync(path.join(www, 'index.html'), head.replace(/<link rel="manifest"[^>]*>\n|<link rel="(apple-touch-)?icon"[^>]*>\n/g, '') + page + '\n</body>\n</html>\n');
+  console.log('android-app/www built');
+})();

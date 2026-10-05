@@ -3,6 +3,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Manrope:wght@300;400;600;800&family=Playfair+Display:ital,wght@1,600&family=Special+Elite&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js" integrity="sha384-wr0AQH9RBAKio/g7bHM5245MBCU5B/b0Y9u42cTxRYQQJXKEijZvWEJKL9JG26hs" crossorigin="anonymous"></script>
 <style>
 /* Layout: one phone-width column, steps stacked like a camera app's workflow; a sticky capture bar at the bottom. */
 :root{
@@ -964,20 +965,25 @@ function musicBpm(anim) {
   return TRACKS[curTrackKey()].bpm;
 }
 
+const hasMusic = () => !(musicKey === 'none' || (musicKey === 'own' && !ownSong));
+// Builds the chosen music into `out` on any audio context: live preview or offline export.
+function buildMusic(ac, out, start, dur) {
+  const vol = musicKey === 'own' ? .9 : .5;
+  out.gain.setValueAtTime(0, start); out.gain.linearRampToValueAtTime(vol, start + .3);
+  out.gain.setValueAtTime(vol, start + Math.max(.4, dur - 1.2)); out.gain.linearRampToValueAtTime(0, start + dur);
+  if (musicKey === 'own') {
+    const src = ac.createBufferSource(); src.buffer = ownSong.buffer; src.loop = true;
+    src.loopStart = ownSong.offset; src.loopEnd = ownSong.buffer.duration;
+    src.connect(out); src.start(start, songStartAt());
+  } else synthTrack(ac, out, start, dur, TRACKS[curTrackKey()]);
+}
 function startMusic(dur, record) {
-  if (musicKey === 'none' || (musicKey === 'own' && !ownSong)) return null;
+  if (!hasMusic()) return null;
   const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
   const ac = new AC(), out = ac.createGain(), now = ac.currentTime + .05;
   out.connect(ac.destination);
   const dest = record && ac.createMediaStreamDestination ? ac.createMediaStreamDestination() : null; if (dest) out.connect(dest);
-  const vol = musicKey === 'own' ? .9 : .5;
-  out.gain.setValueAtTime(0, now); out.gain.linearRampToValueAtTime(vol, now + .3);
-  out.gain.setValueAtTime(vol, now + Math.max(.4, dur - 1.2)); out.gain.linearRampToValueAtTime(0, now + dur);
-  if (musicKey === 'own') {
-    const src = ac.createBufferSource(); src.buffer = ownSong.buffer; src.loop = true;
-    src.loopStart = ownSong.offset; src.loopEnd = ownSong.buffer.duration;
-    src.connect(out); src.start(now, songStartAt());
-  } else synthTrack(ac, out, now, dur, TRACKS[curTrackKey()]);
+  buildMusic(ac, out, now, dur);
   return { dest, stop() { try { ac.close(); } catch {} } };
 }
 
@@ -1128,7 +1134,87 @@ function playReel({ record = false, onDone } = {}) {
   return music;
 }
 function renderReelStill() { const plan = reelPlan(); renderReel(rctx, Math.min(plan.D * .7, plan.total), plan); }
+const FPS = 30;
+async function mp4VideoCodec() {
+  if (!window.VideoEncoder || !window.VideoFrame || !window.Mp4Muxer) return null;
+  for (const codec of ['avc1.4d0028', 'avc1.42001f']) {
+    try { if ((await VideoEncoder.isConfigSupported({ codec, width: 720, height: 1280, bitrate: 6e6, framerate: FPS })).supported) return codec; } catch {}
+  }
+  return null;
+}
+async function mp4AudioCodec(sr) {
+  if (!window.AudioEncoder || !window.AudioData) return null;
+  for (const [codec, mux] of [['mp4a.40.2', 'aac'], ['opus', 'opus']]) {
+    try { if ((await AudioEncoder.isConfigSupported({ codec, sampleRate: sr, numberOfChannels: 2, bitrate: 160000 })).supported) return { codec, mux }; } catch {}
+  }
+  return null;
+}
+const yieldUI = () => new Promise(r => setTimeout(r, 0));
+async function exportReelMp4(vcodec) {
+  const plan = reelPlan(), W = 720, H = 1280, frames = Math.ceil(plan.total * FPS);
+  const cv = mk(W, H), cx = cv.getContext('2d');
+  let audio = null, acodec = null;
+  if (hasMusic()) {
+    const sr = 48000; acodec = await mp4AudioCodec(sr);
+    if (acodec) {
+      const oac = new OfflineAudioContext(2, Math.ceil(sr * plan.total), sr), out = oac.createGain(); out.connect(oac.destination);
+      buildMusic(oac, out, 0, plan.total); audio = await oac.startRendering();
+    }
+  }
+  const muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(), fastStart: 'in-memory', firstTimestampBehavior: 'offset',
+    video: { codec: 'avc', width: W, height: H, frameRate: FPS },
+    ...(audio ? { audio: { codec: acodec.mux, sampleRate: audio.sampleRate, numberOfChannels: 2 } } : {}),
+  });
+  let failed = null;
+  const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => { failed = e; } });
+  venc.configure({ codec: vcodec, width: W, height: H, bitrate: 6e6, framerate: FPS, avc: { format: 'avc' } });
+  for (let f = 0; f < frames; f++) {
+    if (failed) throw failed;
+    renderReel(cx, f / FPS, plan);
+    const vf = new VideoFrame(cv, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+    venc.encode(vf, { keyFrame: f % (FPS * 2) === 0 }); vf.close();
+    if (f % 3 === 0) { rctx.drawImage(cv, 0, 0, reelCv.width, reelCv.height); $('#recProg i').style.width = (f / frames * 92) + '%'; await yieldUI(); }
+    while (venc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 2));
+  }
+  await venc.flush(); venc.close();
+  if (audio) {
+    const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => { failed = e; } });
+    aenc.configure({ codec: acodec.codec, sampleRate: audio.sampleRate, numberOfChannels: 2, bitrate: 160000 });
+    const L = audio.getChannelData(0), R = audio.getChannelData(1), N = 4800;
+    for (let i = 0; i < audio.length; i += N) {
+      const n = Math.min(N, audio.length - i), data = new Float32Array(n * 2);
+      data.set(L.subarray(i, i + n), 0); data.set(R.subarray(i, i + n), n);
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: audio.sampleRate, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(i * 1e6 / audio.sampleRate), data });
+      aenc.encode(ad); ad.close();
+      while (aenc.encodeQueueSize > 10) await new Promise(r => setTimeout(r, 2));
+    }
+    await aenc.flush(); aenc.close();
+  }
+  if (failed) throw failed;
+  muxer.finalize();
+  return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+}
 async function recordReel() {
+  stopReel();
+  const vcodec = await mp4VideoCodec();
+  if (vcodec) {
+    $('#reelVideo').hidden = true; reelCv.hidden = false; $('#playBtn').hidden = true; $('#recProg').hidden = false;
+    try {
+      const blob = await exportReelMp4(vcodec);
+      reelBlob = blob; reelExt = 'mp4';
+      $('#recProg').hidden = true; $('#playBtn').hidden = false; renderReelStill();
+      toast('Video-ul e gata. Apasă „Salvează video”.');
+      return blob;
+    } catch (e) {
+      console.error('MP4 export', e);
+      $('#recProg').hidden = true; $('#playBtn').hidden = false;
+    }
+  }
+  return recordReelLive();
+}
+// Fallback for browsers without WebCodecs: record the canvas in real time.
+async function recordReelLive() {
   if (!reelCv.captureStream || !window.MediaRecorder) { toast('Telefonul acesta nu poate înregistra video din browser. Încearcă din Chrome sau Safari actualizat.'); return null; }
   const types = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
   const mime = types.find(m => MediaRecorder.isTypeSupported(m)) || '';
@@ -1240,11 +1326,11 @@ function updateSaveUI() {
   $('#dockSave').textContent = btn.textContent; $('#dockSave').disabled = !n;
   $('#shareBtn').hidden = !canShareFiles(); $('#shareBtn').disabled = !n;
   const hint = !IN_ARTIFACT
-    ? (tab === 'reel' ? 'Video-ul se creează în timp real (aprox. ' + Math.round(reelPlan().total) + ' s). „Trimite” îl deschide direct în Instagram, TikTok sau WhatsApp.' : '„Salvează” pune pozele în Galerie. „Trimite” le deschide direct în Instagram, Facebook sau WhatsApp.')
+    ? (tab === 'reel' ? 'Video MP4 de ' + Math.round(reelPlan().total) + ' s, gata în câteva secunde. „Trimite” îl deschide direct în Instagram, TikTok sau WhatsApp.' : '„Salvează” pune pozele în Galerie. „Trimite” le deschide direct în Instagram, Facebook sau WhatsApp.')
     : !caps.downloads
     ? (tab === 'reel' ? 'Video-ul se creează în timp real, cât durează animația.' : 'Ține degetul apăsat pe imagine și alege „Salvează imaginea”.')
     : tab === 'carusel' ? 'Le salvezi pe toate odată sau atingi un slide ca să-l salvezi doar pe el.'
-    : tab === 'reel' ? 'Video-ul se creează în timp real, cât durează animația (aprox. ' + Math.round(reelPlan().total) + ' s).' : '';
+    : tab === 'reel' ? 'Video MP4 de ' + Math.round(reelPlan().total) + ' s, gata în câteva secunde.' : '';
   $('#saveHint').textContent = hint + (tab === 'reel' && reelBlob && reelExt === 'webm' ? ' Browserul a creat un fișier .webm; dacă Instagram nu-l acceptă, deschide aplicația din Chrome sau Safari actualizat.' : '');
 }
 
@@ -1252,12 +1338,21 @@ const slug = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^
 
 /* ---------- saving ---------- */
 const IN_ARTIFACT = !!window.claude;
+// Inside the Android app (Capacitor) files go through the native Media plugin: gallery + share sheet.
+const NATIVE = !!window.Capacitor?.isNativePlatform?.();
+const plainMime = (blob, filename) => (blob.type || '').split(';')[0] || (/\.mp4$/.test(filename) ? 'video/mp4' : /\.webm$/.test(filename) ? 'video/webm' : 'image/jpeg');
+const blobToB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+async function nativeFile(filename, blob) { return { name: filename, mime: plainMime(blob, filename), data: await blobToB64(blob) }; }
 function downloadBlob(filename, blob) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
 }
-const canShareFiles = () => { try { return !IN_ARTIFACT && !!navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.jpg', { type: 'image/jpeg' })] }); } catch { return false; } };
-async function saveFile(filename, blob) {
+const canShareFiles = () => { if (NATIVE) return true; try { return !IN_ARTIFACT && !!navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.jpg', { type: 'image/jpeg' })] }); } catch { return false; } };
+async function saveFile(filename, blob, quiet = false) {
+  if (NATIVE) {
+    try { await Capacitor.Plugins.Media.saveToGallery(await nativeFile(filename, blob)); if (!quiet) toast('Salvat în Galerie, în albumul „Colaj Rapid”.'); return true; }
+    catch (e) { toast('Nu am putut salva în Galerie: ' + (e?.message || 'eroare')); return false; }
+  }
   if (!IN_ARTIFACT) { downloadBlob(filename, blob); toast('Salvat în Descărcări. Îl găsești și în Galerie.'); return true; }
   if (!caps.downloads) { toast('Ține degetul apăsat pe imagine și alege „Salvează imaginea”.'); return false; }
   try { await caps.downloads.save({ filename, data: blob }); toast('Salvat'); return true; }
@@ -1272,6 +1367,10 @@ async function doSave() {
   const name = slug(placeName()) || 'postare';
   if (tab === 'colaj' && collageBlob) return saveFile(`${name}-colaj.jpg`, collageBlob);
   if (tab === 'carusel') {
+    if (NATIVE) {
+      let ok = 0; for (let i = 0; i < slideBlobs.length; i++) if (await saveFile(`${name}-${String(i + 1).padStart(2, '0')}.jpg`, slideBlobs[i], true)) ok++;
+      if (ok) toast(`${ok} imagini salvate în Galerie, în albumul „Colaj Rapid”.`); return ok > 0;
+    }
     if (!IN_ARTIFACT) { // separate pictures go straight to the gallery
       for (let i = 0; i < slideBlobs.length; i++) { downloadBlob(`${name}-${String(i + 1).padStart(2, '0')}.jpg`, slideBlobs[i]); await new Promise(r => setTimeout(r, 350)); }
       toast(`${slideBlobs.length} imagini salvate în Descărcări.`); return true;
@@ -1298,6 +1397,11 @@ async function doShare() {
     files = [new File([reelBlob], `${name}-reel.${reelExt}`, { type: reelBlob.type })];
   }
   if (!files.length) return;
+  if (NATIVE) {
+    try { await Capacitor.Plugins.Media.share({ files: await Promise.all(files.map(f => nativeFile(f.name, f))) }); }
+    catch (e) { toast('Nu am putut deschide trimiterea: ' + (e?.message || 'eroare')); }
+    return;
+  }
   try { await navigator.share({ files }); }
   catch (e) { if (e?.name !== 'AbortError') toast('Telefonul nu a putut deschide trimiterea. Salvează și pune din Galerie.'); }
 }

@@ -1,0 +1,8 @@
+{
+  "appId": "ro.colajrapid.app",
+  "appName": "Colaj Rapid",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#ECEEF1"
+  }
+}

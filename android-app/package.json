@@ -1,0 +1,14 @@
+{
+  "name": "colaj-rapid-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Colaj Rapid packaged as an Android app with Capacitor",
+  "scripts": {
+    "sync": "node ../build-site.js && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/cli": "^7.6.9",
+    "@capacitor/core": "^7.6.9"
+  }
+}
