@@ -478,14 +478,24 @@ const ANIMS = {
   cinematic: { label: 'Cinematic',       desc: 'Benzi negre, lumini calde, ritm lent', bpm: 84, beats: 4, T: 1.0, trans: ['fade', 'leak', 'burn', 'dipblack'], bars: true, leaks: true, kb: .16, energy: 0 },
   focus:     { label: 'Focus',           desc: 'Poza apare din neclar, ca la cameră', bpm: 90, beats: 4, T: .7, trans: ['fade'], focus: true, kb: .08, energy: 0 },
   phone:     { label: 'Ecran telefon',   desc: 'Pozele într-un telefon, ca la Stories', bpm: 108, beats: 3, T: .45, render: renderPhone, energy: 1 },
+  liquid:    { label: 'Lichid',          desc: 'Imaginea curge ca apa între poze', bpm: 100, beats: 3, T: .8, trans: ['liquid', 'dissolve', 'ripple'], post: 'wave', kb: .08, energy: 1 },
+  swirl:     { label: 'Vârtej',          desc: 'Pozele se răsucesc una în alta', bpm: 118, beats: 2, T: .6, trans: ['swirl', 'zoomblur', 'swirl', 'ripple'], pulse: .03, kb: .06, energy: 2 },
+  pixel:     { label: 'Pixel',           desc: 'Pozele se sparg în pixeli, ca în jocuri', bpm: 120, beats: 2, T: .5, trans: ['pixelate', 'glitchgl'], post: 'pixel', kb: .05, energy: 2 },
+  kaleido:   { label: 'Caleidoscop',     desc: 'Oglinzi care se rotesc pe ritm', bpm: 116, beats: 2, T: .6, trans: ['kaleido'], post: 'kaleido', kb: .06, energy: 2 },
+  lens:      { label: 'Zoom lens',       desc: 'Zoom cu blur și culori decalate pe beat', bpm: 124, beats: 2, T: .4, trans: ['chromazoom', 'zoomblur'], post: 'radial', kb: .05, energy: 2 },
+  clone:     { label: 'Clone',           desc: 'Poza se multiplică în grilă pe beat', bpm: 120, beats: 2, T: .4, trans: ['clone'], post: 'clone', kb: .05, energy: 2 },
+  mirror:    { label: 'Oglindă',         desc: 'Imaginea se pliază în oglindă', bpm: 104, beats: 3, T: .6, trans: ['mirror', 'dissolve'], kb: .08, energy: 1 },
+  freeze:    { label: 'Freeze flash',    desc: 'Imaginea îngheață cu bliț, ca o poză', bpm: 100, beats: 3, T: .1, render: renderFreeze, energy: 1 },
+  splitscreen: { label: 'Split screen',  desc: '2–3 poze deodată, schimbate pe ritm', bpm: 110, beats: 2, T: .3, render: renderSplitScreen, energy: 1 },
   letters:   { label: 'Pozele în litere', desc: 'Textul tău mare, cu pozele în el', bpm: 100, beats: 4, T: .1, render: renderLetters, energy: 1 },
   grid:      { label: 'Grilă',           desc: 'Pozele umplu o grilă, apoi zoom pe una', bpm: 110, beats: 1, T: .4, render: renderGrid, max: 9, duration: (n, beat) => Math.min(n, 9) * Math.max(beat, .45) + 5 * beat, energy: 1 },
 };
 const ANIM_GROUPS = [
-  ['Ritm', ['dump', 'ramp', 'beatzoom', 'dinamic', 'glitch']],
+  ['Efecte pro', ['liquid', 'swirl', 'pixel', 'kaleido', 'lens', 'clone', 'mirror']],
+  ['Ritm', ['dump', 'ramp', 'beatzoom', 'freeze', 'dinamic', 'glitch']],
   ['3D', ['card3d', 'coverflow', 'film', 'split']],
   ['Retro & stil', ['vhs', 'polaroid', 'scrapbook', 'cinematic', 'focus']],
-  ['Ecran & text', ['phone', 'letters', 'grid']],
+  ['Ecran & text', ['phone', 'splitscreen', 'letters', 'grid']],
 ];
 const AUTO_ANIM = { vara: 'dinamic', seara: 'cinematic', film: 'polaroid', minimal: 'split', modern: 'glitch' };
 let animKey = 'auto';
@@ -624,8 +634,177 @@ function vhsPost(ctx, W, H, t) {
   ctx.shadowColor = 'transparent';
 }
 
+/* ---------- GPU effects (WebGL): distortion transitions and beat effects ---------- */
+// Transitions get two frames (from, to) and a progress 0..1; post effects get one frame and an amount 0..1.
+const GL_HEAD = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform sampler2D from, to; uniform float progress, ratio, time, amount; varying vec2 uv;
+const float PI = 3.14159265;
+vec4 getFrom(vec2 p) { return texture2D(from, clamp(p, 0.0, 1.0)); }
+vec4 getTo(vec2 p) { return texture2D(to, clamp(p, 0.0, 1.0)); }
+float rnd(vec2 c) { return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(rnd(i), rnd(i + vec2(1, 0)), f.x), mix(rnd(i + vec2(0, 1)), rnd(i + vec2(1, 1)), f.x), f.y); }
+vec2 kal(vec2 p, float segs, float rot) { vec2 c = p - 0.5; c.x *= ratio; float a = atan(c.y, c.x) + rot, r = length(c), s = 2.0 * PI / segs;
+  a = mod(a, s); a = abs(a - s * 0.5); vec2 q = vec2(cos(a), sin(a)) * r; q.x /= ratio; return q + 0.5; }
+`;
+const GL_FX = {
+  ripple: `void main() { vec2 d = uv - 0.5; d.x *= ratio; float len = length(d);
+    float w = sin(len * 42.0 - progress * 26.0) * 0.035 * sin(progress * PI);
+    vec2 off = d / (len + 1e-4) * w; off.x /= ratio;
+    float edge = smoothstep(progress * 1.25 - 0.18, progress * 1.25, len);
+    gl_FragColor = mix(getTo(uv + off), getFrom(uv + off), edge); }`,
+  swirl: `void main() { vec2 c = uv - 0.5; c.x *= ratio; float d = length(c), s = sin(progress * PI);
+    float a = s * 9.0 * max(0.0, 0.85 - d), sn = sin(a), cs = cos(a);
+    vec2 r = vec2(c.x * cs - c.y * sn, c.x * sn + c.y * cs); r.x /= ratio; vec2 p = r + 0.5;
+    gl_FragColor = mix(getFrom(p), getTo(p), smoothstep(0.35, 0.65, progress)); }`,
+  zoomblur: `void main() { float s = sin(progress * PI); vec2 d = uv - 0.5; vec4 a = vec4(0.0), b = vec4(0.0);
+    for (int i = 0; i < 16; i++) { float k = 1.0 - s * 0.28 * float(i) / 15.0; a += getFrom(0.5 + d * k); b += getTo(0.5 + d * k); }
+    gl_FragColor = mix(a / 16.0, b / 16.0, smoothstep(0.4, 0.6, progress)); }`,
+  pixelate: `void main() { float s = sin(progress * PI); float cy = mix(260.0, 14.0, pow(s, 0.7)); vec2 cells = vec2(cy * ratio, cy);
+    vec2 p = s < 0.02 ? uv : (floor(uv * cells) + 0.5) / cells;
+    gl_FragColor = mix(getFrom(p), getTo(p), step(0.5, progress)); }`,
+  kaleido: `void main() { float s = sin(progress * PI); vec2 k = kal(uv, 6.0, progress * 4.0);
+    vec4 a = mix(getFrom(uv), getFrom(k), s), b = mix(getTo(uv), getTo(k), s);
+    gl_FragColor = mix(a, b, smoothstep(0.4, 0.6, progress)); }`,
+  liquid: `void main() { float s = sin(progress * PI);
+    vec2 off = vec2(sin(uv.y * 18.0 + progress * 12.0), cos(uv.x * 14.0 + progress * 9.0)) * 0.045 * s;
+    float m = smoothstep(0.3, 0.7, progress + sin(uv.y * 10.0 + progress * 6.0) * 0.12);
+    gl_FragColor = mix(getFrom(uv + off), getTo(uv - off), m); }`,
+  chromazoom: `void main() { float s = sin(progress * PI), z = 1.0 - s * 0.4, sh = s * 0.035; vec2 d = uv - 0.5;
+    float pick = step(0.5, progress);
+    vec4 r = mix(getFrom(0.5 + d * z * (1.0 + sh)), getTo(0.5 + d * z * (1.0 + sh)), pick);
+    vec4 g = mix(getFrom(0.5 + d * z), getTo(0.5 + d * z), pick);
+    vec4 b = mix(getFrom(0.5 + d * z * (1.0 - sh)), getTo(0.5 + d * z * (1.0 - sh)), pick);
+    gl_FragColor = vec4(r.r, g.g, b.b, 1.0); }`,
+  mirror: `void main() { float s = sin(progress * PI); vec2 p = uv;
+    if (uv.x > 0.5) p.x = mix(uv.x, 1.0 - uv.x, smoothstep(0.0, 0.6, s));
+    if (uv.y < 0.5) p.y = mix(uv.y, 1.0 - uv.y, smoothstep(0.4, 1.0, s));
+    gl_FragColor = mix(getFrom(p), getTo(p), step(0.5, progress)); }`,
+  clone: `void main() { float s = sin(progress * PI), n = 1.0 + floor(s * 2.99); vec2 f = fract(uv * n);
+    vec4 c = mix(getFrom(f), getTo(f), step(0.5, progress));
+    float edge = n > 1.0 ? smoothstep(0.0, 0.012 * n, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))) : 1.0;
+    gl_FragColor = vec4(c.rgb * edge, 1.0); }`,
+  glitchgl: `void main() { float s = sin(progress * PI); vec2 bl = floor(uv * vec2(8.0, 26.0)); float r = rnd(bl + floor(progress * 14.0));
+    vec2 off = vec2((r - 0.5) * 0.24 * s * step(0.55, r), 0.0); float sh = 0.012 * s, pick = step(0.5, progress);
+    float cr = mix(getFrom(uv + off + vec2(sh, 0.0)), getTo(uv + off + vec2(sh, 0.0)), pick).r;
+    float cg = mix(getFrom(uv + off), getTo(uv + off), pick).g;
+    float cb = mix(getFrom(uv + off - vec2(sh, 0.0)), getTo(uv + off - vec2(sh, 0.0)), pick).b;
+    gl_FragColor = vec4(cr, cg, cb, 1.0); }`,
+  dissolve: `void main() { float n = vnoise(uv * vec2(ratio, 1.0) * 7.0) * 0.65 + vnoise(uv * 26.0) * 0.35; float e = progress * 1.2 - 0.1;
+    vec4 c = mix(getTo(uv), getFrom(uv), smoothstep(e - 0.02, e + 0.02, n));
+    float glow = (1.0 - smoothstep(0.0, 0.05, abs(n - e))) * step(0.001, progress) * step(progress, 0.999);
+    gl_FragColor = vec4(c.rgb + vec3(1.0, 0.55, 0.15) * glow, 1.0); }`,
+  // post effects (single frame in "from")
+  p_wave: `void main() { vec2 p = uv + vec2(sin(uv.y * 12.0 + time * 2.0), cos(uv.x * 10.0 + time * 1.7)) * 0.007 * amount; gl_FragColor = getFrom(p); }`,
+  p_kaleido: `void main() { gl_FragColor = mix(getFrom(uv), getFrom(kal(uv, 6.0, time * 0.6)), amount); }`,
+  p_radial: `void main() { vec2 d = uv - 0.5; vec4 a = vec4(0.0); float sh = amount * 0.02;
+    for (int i = 0; i < 12; i++) { float k = 1.0 - amount * 0.12 * float(i) / 11.0; a += vec4(getFrom(0.5 + d * k * (1.0 + sh)).r, getFrom(0.5 + d * k).g, getFrom(0.5 + d * k * (1.0 - sh)).b, 1.0); }
+    gl_FragColor = a / 12.0; }`,
+  p_pixel: `void main() { float cy = mix(1280.0, 22.0, amount); vec2 cells = vec2(cy * ratio, cy);
+    gl_FragColor = getFrom(amount < 0.03 ? uv : (floor(uv * cells) + 0.5) / cells); }`,
+  p_clone: `void main() { float n = 1.0 + floor(amount * 2.99); vec2 f = fract(uv * n);
+    float edge = n > 1.0 ? smoothstep(0.0, 0.012 * n, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))) : 1.0;
+    gl_FragColor = vec4(getFrom(f).rgb * edge, 1.0); }`,
+};
+const GL_TRANS = new Set(Object.keys(GL_FX).filter(k => !k.startsWith('p_')));
+const glfx = (() => {
+  let cv = null, gl = null, broken = false, quad = null; const progs = {}, tex = [];
+  function init(W, H) {
+    if (broken) return null;
+    if (!gl) {
+      cv = document.createElement('canvas');
+      gl = cv.getContext('webgl', { premultipliedAlpha: false, preserveDrawingBuffer: true, antialias: false });
+      if (!gl) { broken = true; return null; }
+      quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      for (let i = 0; i < 2; i++) {
+        const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+        for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+        tex.push(t);
+      }
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    }
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    gl.viewport(0, 0, W, H);
+    return gl;
+  }
+  function program(name) {
+    if (progs[name] !== undefined) return progs[name];
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.warn(name, gl.getShaderInfoLog(s)); return null; } return s; };
+    const vs = sh(gl.VERTEX_SHADER, 'attribute vec2 pos; varying vec2 uv; void main() { uv = pos * 0.5 + 0.5; gl_Position = vec4(pos, 0.0, 1.0); }');
+    const fs = sh(gl.FRAGMENT_SHADER, GL_HEAD + GL_FX[name]);
+    if (!vs || !fs) return progs[name] = null;
+    const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return progs[name] = null;
+    p.u = n => gl.getUniformLocation(p, n); p.pos = gl.getAttribLocation(p, 'pos');
+    return progs[name] = p;
+  }
+  // Returns the WebGL canvas with the result, or null when the GPU path is unavailable.
+  function run(name, A, B, { progress = 0, time = 0, amount = 0 } = {}) {
+    try {
+      if (!init(A.width, A.height)) return null;
+      const p = program(name); if (!p) return null;
+      gl.useProgram(p);
+      [A, B || A].forEach((img, i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, tex[i]); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); });
+      gl.uniform1i(p.u('from'), 0); gl.uniform1i(p.u('to'), 1);
+      gl.uniform1f(p.u('progress'), progress); gl.uniform1f(p.u('ratio'), A.width / A.height);
+      gl.uniform1f(p.u('time'), time); gl.uniform1f(p.u('amount'), amount);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.enableVertexAttribArray(p.pos); gl.vertexAttribPointer(p.pos, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return cv;
+    } catch (e) { console.warn('GL effect', name, e); broken = true; return null; }
+  }
+  return { run, available: () => !broken && !!init(2, 2) };
+})();
+// Beat-driven strength for post effects: 1 on the beat, fading out; `every` = only every Nth beat.
+const beatPulse = (t, beat, every = 1, decay = 6) => Math.floor(t / beat + 1e-6) % every ? 0 : Math.exp(-(t % beat) * decay);
+function applyPost(ctx, anim, t, beat) {
+  const amt = anim.post === 'wave' ? 1 : anim.post === 'kaleido' ? .9 * beatPulse(t, beat, 1, 5)
+    : anim.post === 'radial' ? beatPulse(t, beat, 1, 7) : anim.post === 'pixel' ? .75 * beatPulse(t, beat, 2, 8)
+    : anim.post === 'clone' ? beatPulse(t, beat, 2, 4) : 0;
+  if (amt < .02 && anim.post !== 'wave') return;
+  const out = glfx.run('p_' + anim.post, ctx.canvas, null, { time: t, amount: amt });
+  if (out) ctx.drawImage(out, 0, 0, ctx.canvas.width, ctx.canvas.height);
+}
+
+/* freeze flash: the picture freezes with a camera flash and becomes a printed photo */
+function renderFreeze(ctx, t, plan, W, H, st) {
+  const { slots, D } = plan, { i, local } = seqState(t, plan), p = slots[i], tf = D * .45;
+  if (local < tf) { drawReelPhoto(ctx, p, i, local / D, W, H, { kb: .12 }); return; }
+  const k = local - tf, e = easeOutBack(clamp(k / .35)), frozen = tf / D;
+  blurredBg(ctx, p, W, H, .45);
+  const s = 1 - .14 * e, m = W * .035 * e;
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate((i % 2 ? 1 : -1) * .045 * e); ctx.scale(s, s);
+  ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 50 * e; ctx.fillStyle = '#fff'; ctx.fillRect(-W / 2 - m, -H / 2 - m, W + 2 * m, H + 2 * m); ctx.shadowColor = 'transparent';
+  ctx.translate(-W / 2, -H / 2); drawReelPhoto(ctx, p, i, frozen, W, H, { kb: .12 }); ctx.restore();
+  ctx.fillStyle = `rgba(255,255,255,${.9 * Math.exp(-k * 7)})`; ctx.fillRect(0, 0, W, H);
+}
+/* split screen: 2-3 panels, each changes photo on the beat with a staggered slide */
+function renderSplitScreen(ctx, t, plan, W, H, st) {
+  const { slots, D } = plan, n = slots.length, k = n >= 3 ? 3 : Math.max(1, n), step = Math.floor(t / D), gap = 8;
+  ctx.fillStyle = st.bg; ctx.fillRect(0, 0, W, H);
+  const ph = (H - gap * (k - 1)) / k;
+  for (let j = 0; j < k; j++) {
+    const y = j * (ph + gap), local = t - step * D - j * .09, e = ease(clamp(local / .45)), dir = j % 2 ? -1 : 1;
+    const cur = slots[(step + j) % n], prev = slots[(step - 1 + j + n * 4) % n];
+    ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, ph); ctx.clip();
+    if (step > 0 && e < 1) drawCover(ctx, graded(prev), -dir * e * W, y, W, ph, 1.08);
+    drawCover(ctx, graded(cur), dir * (1 - (step > 0 ? e : 1)) * W, y, W, ph, 1.04 + .06 * clamp((t - step * D) / D), (j - 1) * .3, 0);
+    ctx.restore();
+  }
+}
+
 /* transitions: A = current photo frame, B = next, r = 0..1 */
 function transition(ctx, type, r, A, B, W, H) {
+  if (GL_TRANS.has(type)) {
+    const out = glfx.run(type, A, B, { progress: ease(r) });
+    if (out) { ctx.drawImage(out, 0, 0, W, H); return; }
+    type = 'fade'; // no WebGL on this device
+  }
   const q = ease(r), bell = Math.sin(Math.PI * r);
   const d = (img, x = 0, y = 0, a = 1) => { ctx.globalAlpha = a; ctx.drawImage(img, x, y); ctx.globalAlpha = 1; };
   const zd = (img, s, a = 1, rot = 0) => { ctx.save(); ctx.globalAlpha = a; ctx.translate(W / 2, H / 2); ctx.rotate(rot); ctx.scale(s, s); ctx.drawImage(img, -W / 2, -H / 2); ctx.restore(); };
@@ -902,6 +1081,7 @@ function renderReel(ctx, t, plan) {
     } else drawReelPhoto(ctx, slots[i], i, prog(i), W, H, anim, pulse);
     ctx.restore();
   }
+  if (anim.post && t < main) applyPost(ctx, anim, t, beat);
   if (anim.leaks) lightLeak(ctx, W, H, .5, (t * .07) % 1.2);
   if (anim.dust) dust(ctx, W, H, t);
   if (curKey() === 'seara') {
@@ -955,7 +1135,8 @@ const TRACKS = {
 };
 // Which generated track "Auto" uses for each animation.
 const AUTO_TRACK = { dump: 'house', ramp: 'trap', beatzoom: 'trap', dinamic: 'house', glitch: 'house', card3d: 'pop', coverflow: 'pop', film: 'lofi', split: 'pop',
-  vhs: 'lofi', polaroid: 'vara', scrapbook: 'vara', cinematic: 'cinematic', focus: 'lofi', phone: 'pop', letters: 'pop', grid: 'vara' };
+  vhs: 'lofi', polaroid: 'vara', scrapbook: 'vara', cinematic: 'cinematic', focus: 'lofi', phone: 'pop', letters: 'pop', grid: 'vara',
+  liquid: 'lofi', swirl: 'house', pixel: 'trap', kaleido: 'house', lens: 'trap', clone: 'house', mirror: 'pop', freeze: 'pop', splitscreen: 'pop' };
 let musicKey = 'auto', ownSong = null; // ownSong: { name, buffer, bpm, offset, start }
 const curTrackKey = () => musicKey === 'auto' ? AUTO_TRACK[curAnimKey()] || 'pop' : musicKey;
 // Tempo the photos follow: the chosen track's, the analysed song's, or the animation's own when silent.
