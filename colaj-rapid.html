@@ -582,11 +582,14 @@ const ANIMS = {
   vblur:     { label: 'Blur',            desc: 'Se încețoșează și apare următorul', bpm: 96, beats: 4, T: .7, trans: ['cblur'], kb: .05, post: 'wave', cutClips: true, energy: 0 },
   vflash:    { label: 'Flash',           desc: 'Bliț alb cu zoom pe beat', bpm: 124, beats: 3, T: .35, trans: ['cflash'], pulse: .08, beatFlash: .45, kb: .04, cutClips: true, energy: 2 },
   vshake:    { label: 'Glitch shake',    desc: 'Cadrul tremură cu culori decalate', bpm: 124, beats: 3, T: .4, trans: ['glitchgl', 'cshake'], shake: 1, beatShake: .035, post: 'pixel', pulse: .05, kb: .04, cutClips: true, energy: 2 },
+  vcine:     { label: 'Cinematic pro',   desc: 'Expunere, lumină caldă, benzi de cinema', bpm: 92, beats: 4, T: .8, trans: ['cexpo', 'leak', 'cbars', 'burn', 'cblur'], kb: .06, cutClips: true, energy: 0 },
+  velegant:  { label: 'Elegant',         desc: 'Iris, cerneală, uși și întoarcere 3D', bpm: 100, beats: 3, T: .7, trans: ['ciris', 'dissolve', 'cdoors', 'cflip3d'], pulse: .03, kb: .05, cutClips: true, energy: 1 },
+  vpro:      { label: 'Pro mix',         desc: 'Tranzițiile noi, pe rând', bpm: 108, beats: 3, T: .65, trans: ['clens', 'ciris', 'cexpo', 'csquares', 'cflip3d', 'chromazoom', 'cdoors', 'cpanels', 'leak', 'cbars'], pulse: .04, kb: .04, cutClips: true, energy: 1 },
   vcustom:   { label: 'Combinația ta',   desc: 'Tranzițiile și efectele alese de tine', bpm: 115, beats: 3, T: .55, trans: ['czoomin'], kb: .04, cutClips: true, energy: 2 },
   grid:      { label: 'Grilă',           desc: 'Pozele umplu o grilă, apoi zoom pe una', bpm: 110, beats: 1, T: .4, render: renderGrid, max: 9, duration: (n, beat) => Math.min(n, 9) * Math.max(beat, .45) + 5 * beat, energy: 1 },
 };
 const ANIM_GROUPS = [
-  ['Tranziții video', ['vmix', 'vzoomin', 'vzoomout', 'vwhip', 'vwhipv', 'vspin', 'vcube', 'vstretch', 'vslide', 'vblur', 'vflash', 'vshake']],
+  ['Tranziții video', ['vpro', 'vcine', 'velegant', 'vmix', 'vzoomin', 'vzoomout', 'vwhip', 'vwhipv', 'vspin', 'vcube', 'vstretch', 'vslide', 'vblur', 'vflash', 'vshake']],
   ['Efecte pro', ['liquid', 'swirl', 'pixel', 'kaleido', 'lens', 'clone', 'mirror']],
   ['Ritm', ['dump', 'ramp', 'beatzoom', 'freeze', 'dinamic', 'glitch']],
   ['3D', ['card3d', 'coverflow', 'film', 'split']],
@@ -892,6 +895,33 @@ const GL_FX = {
     for (int i = 0; i < 24; i++) { float t = float(i) * 2.39996, rr = r * sqrt((float(i) + 0.5) / 24.0); vec2 o = vec2(cos(t) / ratio, sin(t)) * rr;
       vec2 q = 0.5 + d / z + o; a += getFrom(q); c += getTo(q); }
     gl_FragColor = mix(a, c, smoothstep(0.3, 0.7, p)) / 24.0; }`,
+  // "pro" transitions: softer, filmic
+  cexpo: `void main() { float p = progress, b = sin(p * PI), m = smoothstep(0.4, 0.6, p); vec4 bl = vec4(0.0);
+    for (int i = 0; i < 12; i++) { float t = float(i) * 2.39996, r = 0.035 * b * sqrt((float(i) + 0.5) / 12.0); vec2 o = vec2(cos(t) / ratio, sin(t)) * r; bl += mix(getFrom(uv + o), getTo(uv + o), m); }
+    bl /= 12.0; vec3 col = bl.rgb * (1.0 + b * 0.7) + vec3(b * b * 0.12);
+    gl_FragColor = vec4(min(col, vec3(1.0)), 1.0); }`,
+  clens: `void main() { float p = progress, b = sin(p * PI); vec2 d = uv - 0.5; d.x *= ratio; float r = length(d);
+    vec2 q = d / (1.0 + b * 1.6 * r * r); q /= p < 0.5 ? 1.0 + p * 1.3 : 1.0 + (1.0 - p) * 1.3; q.x /= ratio; q += 0.5; vec4 s = vec4(0.0);
+    for (int i = 0; i < 10; i++) { vec2 qq = 0.5 + (q - 0.5) * (1.0 - b * 0.14 * float(i) / 9.0); s += p < 0.5 ? fromM(qq) : toM(qq); }
+    gl_FragColor = vec4((s / 10.0).rgb * (1.0 - b * 0.35 * r), 1.0); }`,
+  ciris: `void main() { float p = progress; vec2 d = uv - 0.5; d.x *= ratio; float r = length(d), R = p * (length(vec2(ratio * 0.5, 0.5)) + 0.12);
+    float e = smoothstep(R - 0.09, R, r); vec4 b = getTo(0.5 + (uv - 0.5) / (1.0 + (1.0 - p) * 0.18));
+    gl_FragColor = vec4(mix(b.rgb, getFrom(uv).rgb * (1.0 - 0.35 * p), e), 1.0); }`,
+  cflip3d: `void main() { float p = progress, a = p < 0.5 ? p * PI : p * PI - PI, c = cos(a), sn = sin(a), k = 0.55;
+    float sx = uv.x - 0.5, X = sx / (c - sx * sn * k), w = 1.0 + X * sn * k; vec2 q = vec2(X + 0.5, (uv.y - 0.5) * w + 0.5);
+    vec4 bg = mix(getFrom(vec2(0.5)), getTo(vec2(0.5)), step(0.5, p)) * 0.25;
+    vec4 col = p < 0.5 ? getFrom(q) : getTo(q);
+    float inside = step(0.0, q.x) * step(q.x, 1.0) * step(0.0, q.y) * step(q.y, 1.0) * step(0.0, w);
+    gl_FragColor = vec4(mix(bg.rgb, col.rgb * (1.0 - 0.45 * abs(sn)), inside), 1.0); }`,
+  cdoors: `void main() { float p = progress, o = p * 0.5; vec4 b = getTo(0.5 + (uv - 0.5) / (1.0 + (1.0 - p) * 0.22)), col = b;
+    if (uv.x < 0.5) { vec2 q = uv + vec2(o, 0.0); if (q.x < 0.5) col = getFrom(q) * (1.0 - 0.4 * p); }
+    else { vec2 q = uv - vec2(o, 0.0); if (q.x > 0.5) col = getFrom(q) * (1.0 - 0.4 * p); }
+    float edge = min(abs(uv.x - (0.5 - o)), abs(uv.x - (0.5 + o)));
+    gl_FragColor = vec4(col.rgb * (0.65 + 0.35 * smoothstep(0.0, 0.04, edge * (1.0 + 4.0 * (1.0 - p)))), 1.0); }`,
+  csquares: `void main() { float p = progress; vec2 cells = vec2(10.0 * ratio, 10.0), g = floor(uv * cells);
+    float delay = (g.x / cells.x + 1.0 - g.y / cells.y) * 0.32 + rnd(g) * 0.16, t = clamp((p - delay) / 0.3, 0.0, 1.0);
+    vec2 f = fract(uv * cells) - 0.5; float inside = step(max(abs(f.x), abs(f.y)), t * 0.5 + 0.001);
+    gl_FragColor = mix(getFrom(uv), getTo(uv), inside); }`,
   // post effects (single frame in "from")
   p_wave: `void main() { vec2 p = uv + vec2(sin(uv.y * 12.0 + time * 2.0), cos(uv.x * 10.0 + time * 1.7)) * 0.007 * amount; gl_FragColor = getFrom(p); }`,
   p_kaleido: `void main() { gl_FragColor = mix(getFrom(uv), getFrom(kal(uv, 6.0, time * 0.6)), amount); }`,
@@ -1000,7 +1030,7 @@ function renderSplitScreen(ctx, t, plan, W, H, st) {
 /* transitions: A = current photo frame, B = next, r = 0..1 */
 // Directional variants of one shader ([shader, direction]), and what to draw when WebGL is missing.
 const GL_ALIAS = { cwhipl: ['cwhipx', 1], cwhipr: ['cwhipx', -1], cwhipu: ['cwhipy', -1], cwhipd: ['cwhipy', 1] };
-const GL_FALLBACK = { czoomin: 'punch', czoomout: 'punch', cwhipl: 'whip', cwhipr: 'whip', cwhipu: 'whipv', cwhipd: 'whipv', cspin: 'spin', cstretch: 'flip' };
+const GL_FALLBACK = { cexpo: 'fade', clens: 'punch', ciris: 'circle', cflip3d: 'flip', cdoors: 'split', csquares: 'blinds', czoomin: 'punch', czoomout: 'punch', cwhipl: 'whip', cwhipr: 'whip', cwhipu: 'whipv', cwhipd: 'whipv', cspin: 'spin', cstretch: 'flip' };
 function transition(ctx, type, r, A, B, W, H) {
   if (GL_TRANS.has(type) || GL_ALIAS[type]) {
     const [name, dir] = GL_ALIAS[type] || [type, 0];
@@ -1056,6 +1086,15 @@ function transition(ctx, type, r, A, B, W, H) {
       break; }
     case 'circle': d(A); ctx.save(); ctx.beginPath(); ctx.arc(W / 2, H / 2, q * Math.hypot(W, H) / 2, 0, 7); ctx.clip(); d(B); ctx.restore(); break;
     case 'leak': d(A); d(B, 0, 0, q); lightLeak(ctx, W, H, bell * 1.4, r); break;
+    case 'cpanels': { // three vertical panels slide in, alternating from the top and the bottom
+      d(A); const n = 3, pw = W / n;
+      for (let i = 0; i < n; i++) { const e = ease(clamp(r * 1.6 - i * .2)), y = (i % 2 ? -1 : 1) * (1 - e) * H; ctx.drawImage(B, i * pw, 0, pw, H, i * pw, y, pw + 1, H); }
+      break; }
+    case 'cbars': { // cinema bars close over the picture, then open on the next one
+      const k = r < .5 ? ease(r * 2) : ease((1 - r) * 2), h = H / 2 * k; d(r < .5 ? A : B);
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, h); ctx.fillRect(0, H - h, W, h);
+      ctx.fillStyle = `rgba(255,255,255,${.5 * k})`; ctx.fillRect(0, h - 2, W, 2); ctx.fillRect(0, H - h, W, 2);
+      break; }
     case 'cflash': r < .5 ? zd(A, 1 + q * .2) : zd(B, 1 + (1 - q) * .2); ctx.fillStyle = '#fff'; ctx.globalAlpha = Math.pow(bell, 1.5); ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; break;
     case 'cshake': {
       const img = r < .5 ? A : B, a = bell * W * .06, f = Math.floor(r * 24);
@@ -1365,7 +1404,7 @@ const TRACKS = {
 // Which generated track "Auto" uses for each animation.
 const AUTO_TRACK = { dump: 'house', ramp: 'trap', beatzoom: 'trap', dinamic: 'house', glitch: 'house', card3d: 'pop', coverflow: 'pop', film: 'lofi', split: 'pop',
   vhs: 'lofi', polaroid: 'vara', scrapbook: 'vara', cinematic: 'cinematic', focus: 'lofi', phone: 'pop', letters: 'pop', grid: 'vara',
-  liquid: 'lofi', swirl: 'house', pixel: 'trap', kaleido: 'house', lens: 'trap', clone: 'house', mirror: 'pop', freeze: 'pop', splitscreen: 'pop', vcustom: 'house',
+  liquid: 'lofi', swirl: 'house', pixel: 'trap', kaleido: 'house', lens: 'trap', clone: 'house', mirror: 'pop', freeze: 'pop', splitscreen: 'pop', vcustom: 'house', vcine: 'cinematic', velegant: 'lofi', vpro: 'pop',
   vmix: 'house', vzoomin: 'trap', vzoomout: 'pop', vwhip: 'house', vwhipv: 'trap', vspin: 'house', vcube: 'pop', vstretch: 'trap', vslide: 'vara', vblur: 'lofi', vflash: 'house', vshake: 'trap' };
 let musicKey = 'auto', ownSong = null; // ownSong: { name, buffer, bpm, offset, start }
 const curTrackKey = () => musicKey === 'auto' ? AUTO_TRACK[curAnimKey()] || 'pop' : musicKey;
@@ -1789,7 +1828,10 @@ function renderAnimChips() {
 /* ---------- the user's own mix of video transitions and beat effects ---------- */
 const VTRANS = [['zoomin', 'Zoom in', ['czoomin']], ['zoomout', 'Zoom out', ['czoomout']], ['whip', 'Whip stânga-dreapta', ['cwhipl', 'cwhipr']],
   ['whipv', 'Whip sus-jos', ['cwhipu', 'cwhipd']], ['spin', 'Rotire 360°', ['cspin']], ['cube', 'Cub 3D', ['ccube']], ['stretch', 'Întindere', ['cstretch']],
-  ['slide', 'Glisare cu arc', ['cslide']], ['blur', 'Blur', ['cblur']], ['flash', 'Flash alb', ['cflash']], ['shake', 'Shake', ['cshake']], ['glitch', 'Glitch', ['glitchgl']]];
+  ['slide', 'Glisare cu arc', ['cslide']], ['blur', 'Blur', ['cblur']], ['flash', 'Flash alb', ['cflash']], ['shake', 'Shake', ['cshake']], ['glitch', 'Glitch', ['glitchgl']],
+  ['expo', 'Expunere', ['cexpo']], ['leak', 'Lumină caldă', ['leak']], ['burn', 'Film burn', ['burn']], ['bars', 'Benzi cinema', ['cbars']], ['ink', 'Cerneală', ['dissolve']],
+  ['iris', 'Iris', ['ciris']], ['flip3d', 'Întoarcere 3D', ['cflip3d']], ['doors', 'Uși', ['cdoors']], ['lens', 'Lentilă', ['clens']], ['rgbzoom', 'Zoom RGB', ['chromazoom']],
+  ['squares', 'Pătrățele', ['csquares']], ['panels', 'Panouri', ['cpanels']]];
 const VFX = [['zoom', 'Zoom pe beat'], ['shake', 'Tremurat'], ['flash', 'Flash alb pe beat'], ['speed', 'Blur de viteză'], ['glitch', 'Glitch pe beat'], ['pixel', 'Pixeli'], ['wave', 'Val'], ['clone', 'Multiplicare']];
 // What a pack (preset) contains, as chip selections; the chips start from the pack you are on.
 function packToSel(a) {
@@ -1803,7 +1845,7 @@ function packToSel(a) {
 function selToPack(sel) {
   const has = k => sel.fx.includes(k), trans = sel.trans.flatMap(k => VTRANS.find(v => v[0] === k)[2]);
   Object.assign(ANIMS.vcustom, {
-    trans: trans.length ? trans : ['cut'], T: sel.trans.includes('cube') ? .65 : .55,
+    trans: trans.length ? trans : ['cut'], T: sel.trans.some(k => ['cube', 'expo', 'leak', 'burn', 'ink', 'iris', 'flip3d', 'doors', 'squares'].includes(k)) ? .65 : .55,
     pulse: has('zoom') ? .09 : .02, beatShake: has('shake') ? .03 : 0, beatFlash: has('flash') ? .4 : 0,
     posts: [has('speed') && 'radial', has('glitch') && 'glitch', has('pixel') && 'pixel', has('wave') && 'wave', has('clone') && 'clone'].filter(Boolean),
   });
