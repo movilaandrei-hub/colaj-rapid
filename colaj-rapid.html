@@ -47,6 +47,11 @@ input:focus-visible,textarea:focus-visible,button:focus-visible,.btn:focus-visib
 .thumb.off img{opacity:.35;filter:grayscale(1)}
 .thumb.keep{border-color:var(--ok)}
 .badge{position:absolute;left:4px;bottom:4px;font:700 10px/1 var(--body);padding:4px 6px;border-radius:6px;background:var(--surface);color:var(--fg)}
+.vbadge{position:absolute;right:4px;top:4px;font:700 10px/1 var(--body);padding:4px 6px;border-radius:6px;background:rgb(0 0 0 / .65);color:#fff;font-variant-numeric:tabular-nums}
+.thumb.open{outline:2px solid var(--accent);outline-offset:1px}
+.trim{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:10px}
+.trimvid{display:flex;justify-content:center;background:#000;border-radius:10px;overflow:hidden}
+.trimvid video{display:block;max-width:100%;max-height:320px}
 .badge.keep{color:var(--ok)} .badge.blur{color:var(--warn)} .badge.dup{color:var(--bad)} .badge.off{color:var(--muted)}
 .summary{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--sunk);border-radius:12px;padding:4px;gap:4px}
@@ -127,15 +132,28 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       <button class="btn" id="clearBtn" type="button">Golește</button>
     </div>
     <input class="vh" type="file" id="camIn" accept="image/*" capture="environment">
-    <input class="vh" type="file" id="galIn" accept="image/*" multiple>
-    <div class="hint">Fă câte poze vrei, una după alta. Aplicația scoate singură pozele neclare și dublurile.</div>
+    <input class="vh" type="file" id="galIn" accept="image/*,video/*" multiple>
+    <div class="hint">Fă câte poze vrei, una după alta. Din galerie poți alege și video-uri. Aplicația scoate singură pozele neclare și dublurile.</div>
   </section>
 
   <section>
     <h2><span class="n">Pas 2</span> Pozele alese automat</h2>
     <div class="summary" id="summary"></div>
     <div class="strip" id="strip"></div>
-    <div class="hint">Atinge o poză ca s-o scoți sau s-o pui înapoi.</div>
+    <div class="hint">Atinge o poză ca s-o scoți sau s-o pui înapoi. Atinge un video ca să alegi bucata care intră în Reel.</div>
+    <div class="trim" id="trim" hidden>
+      <div class="animhead"><span class="lbl">Taie video-ul</span><span class="animnow" id="trimLen"></span></div>
+      <div class="trimvid" id="trimBox"></div>
+      <div class="field"><label for="trimIn" id="trimInLbl">Începe la 0:00</label><input type="range" id="trimIn" min="0" max="1" step="0.1" value="0"></div>
+      <div class="field"><label for="trimOut" id="trimOutLbl">Se termină la 0:00</label><input type="range" id="trimOut" min="0" max="1" step="0.1" value="1"></div>
+      <div class="row">
+        <button class="btn" id="trimPlay" type="button">▶ Vezi bucata</button>
+        <button class="btn" id="trimAll" type="button">Tot clipul</button>
+        <button class="btn" id="trimToggle" type="button">Scoate clipul</button>
+        <button class="btn primary" id="trimDone" type="button">Gata</button>
+      </div>
+      <div class="hint">În Reel video-ul e pe mut și se aude muzica aleasă. Tranziția dintre clipuri vine din animația aleasă la Pas 3.</div>
+    </div>
   </section>
 
   <section>
@@ -266,14 +284,66 @@ function thumbOf(c) {
 function addPhotoCanvas(c) {
   photos.push({ id: nextId++, src: c, thumb: thumbOf(c), ...analyze(c), auto: 'keep', manual: null, graded: {} });
 }
+/* ---------- video clips: muted, trimmed, played inside the Reel like photos ---------- */
+// p.video = { el, dur, vin, vout }; p.src is a still from the middle (collage, carousel, analysis), p.vcv the live frame.
+function loadVideoEl(url) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video');
+    v.muted = true; v.defaultMuted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+    v.onloadeddata = () => { v.onloadeddata = v.onerror = null; res(v); };
+    v.onerror = () => rej(v.error || new Error('video'));
+    v.src = url;
+  });
+}
+function readAsDataURL(file) { return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); }); }
+function seekVideo(v, t) {
+  return new Promise(res => {
+    if (Math.abs(v.currentTime - t) < 1e-3 && v.readyState >= 2 && !v.seeking) return res();
+    const done = () => { v.removeEventListener('seeked', done); clearTimeout(to); res(); };
+    const to = setTimeout(done, 3000); v.addEventListener('seeked', done); v.currentTime = t;
+  });
+}
+async function fileToVideo(file) {
+  let v = null;
+  // blob: URLs are blocked inside the artifact frame in Firefox; elsewhere they avoid copying the file.
+  if (!IN_ARTIFACT) { const url = URL.createObjectURL(file); try { v = await loadVideoEl(url); } catch { URL.revokeObjectURL(url); } }
+  if (!v) v = await loadVideoEl(await readAsDataURL(file));
+  let dur = v.duration;
+  if (!isFinite(dur)) { await seekVideo(v, 1e7); dur = v.duration; }
+  if (!isFinite(dur) || dur <= 0) throw new Error('duration');
+  await seekVideo(v, Math.min(dur / 2, dur - .05));
+  const vw = v.videoWidth, vh = v.videoHeight; if (!vw || !vh) throw new Error('size');
+  const s1 = Math.min(1, 1400 / Math.max(vw, vh)), still = mk(Math.round(vw * s1), Math.round(vh * s1));
+  still.getContext('2d').drawImage(v, 0, 0, still.width, still.height);
+  const s2 = Math.min(1, 1280 / Math.max(vw, vh)), vcv = mk(Math.round(vw * s2), Math.round(vh * s2));
+  vcv.getContext('2d').drawImage(v, 0, 0, vcv.width, vcv.height);
+  return { still, vcv, video: { el: v, dur, vin: 0, vout: dur } };
+}
+function addVideoClip({ still, vcv, video }) {
+  photos.push({ id: nextId++, src: still, vcv, video, thumb: thumbOf(still), ...analyze(still), auto: 'keep', manual: null, graded: {} });
+}
+const clipLen = p => p.video.vout - p.video.vin;
+// The current video frame, colour-graded like the photos (canvas filters keep it fast enough for playback).
+function drawVideoFrame(p) {
+  const v = p.video.el; if (v.readyState < 2) return;
+  const c = p.vcv, x = c.getContext('2d'), g = curStyle().grade, W = c.width, H = c.height;
+  x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1;
+  if ('filter' in x) x.filter = `brightness(${1 + g.bri / 128}) contrast(${g.con}) saturate(${g.sat})`;
+  x.drawImage(v, 0, 0, W, H);
+  if ('filter' in x) x.filter = 'none';
+  if (g.warm) { x.globalCompositeOperation = 'soft-light'; x.fillStyle = `rgba(255,150,60,${g.warm / 40})`; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over'; }
+  if (g.fade) { x.fillStyle = `rgba(255,255,255,${g.fade / 255})`; x.fillRect(0, 0, W, H); }
+}
 function classify() {
   photos.forEach(p => p.auto = 'keep');
-  if (photos.length >= 3) {
-    const s = photos.map(p => p.sharp).sort((a, b) => a - b), med = s[Math.floor(s.length / 2)];
-    photos.forEach(p => { if (p.sharp < med * .12) p.auto = 'blur'; });
+  const stills = photos.filter(p => !p.video);
+  if (stills.length >= 3) {
+    const s = stills.map(p => p.sharp).sort((a, b) => a - b), med = s[Math.floor(s.length / 2)];
+    stills.forEach(p => { if (p.sharp < med * .12) p.auto = 'blur'; });
   }
   for (let i = 0; i < photos.length; i++) for (let j = i + 1; j < photos.length; j++) {
     const a = photos[i], b = photos[j];
+    if (a.video || b.video) continue;
     if (a.auto !== 'keep' || b.auto !== 'keep') continue;
     let d = 0; for (let k = 0; k < 64; k++) d += a.hash[k] !== b.hash[k];
     if (d <= 8) (a.sharp >= b.sharp ? b : a).auto = 'dup';
@@ -282,7 +352,7 @@ function classify() {
 const status = p => p.manual ?? p.auto;
 function chosen(max) {
   let k = photos.filter(p => status(p) === 'keep');
-  if (max && k.length > max) { const top = new Set([...k].sort((a, b) => b.sharp - a.sharp).slice(0, max)); k = k.filter(p => top.has(p)); }
+  if (max && k.length > max) { const top = new Set([...k].sort((a, b) => !!b.video - !!a.video || b.sharp - a.sharp).slice(0, max)); k = k.filter(p => top.has(p)); }
   return k;
 }
 
@@ -302,7 +372,14 @@ function graded(p) {
   x.putImageData(im, 0, 0);
   p.graded[key] = c; return c;
 }
+// Small copies of a clip's current frame for blurred backgrounds (redrawn each frame, not cached).
+function liveSmall(p, name, w) {
+  const src = p.vcv, h = Math.max(2, Math.round(w * src.height / src.width));
+  let t = p[name]; if (!t || t.width !== w || t.height !== h) t = p[name] = mk(w, h);
+  t.getContext('2d').drawImage(src, 0, 0, w, h); return t;
+}
 function blurredOf(p) {
+  if (p.video) return liveSmall(p, 'vblur', 28);
   const key = 'blur_' + curKey(); if (p.graded[key]) return p.graded[key];
   const src = graded(p); if (p.graded[key]) return p.graded[key];
   const t = mk(28, Math.max(2, Math.round(28 * src.height / src.width)));
@@ -486,7 +563,7 @@ const ANIMS = {
   clone:     { label: 'Clone',           desc: 'Poza se multiplică în grilă pe beat', bpm: 120, beats: 2, T: .4, trans: ['clone'], post: 'clone', kb: .05, energy: 2 },
   mirror:    { label: 'Oglindă',         desc: 'Imaginea se pliază în oglindă', bpm: 104, beats: 3, T: .6, trans: ['mirror', 'dissolve'], kb: .08, energy: 1 },
   freeze:    { label: 'Freeze flash',    desc: 'Imaginea îngheață cu bliț, ca o poză', bpm: 100, beats: 3, T: .1, render: renderFreeze, energy: 1 },
-  splitscreen: { label: 'Split screen',  desc: '2–3 poze deodată, schimbate pe ritm', bpm: 110, beats: 2, T: .3, render: renderSplitScreen, energy: 1 },
+  splitscreen: { label: 'Split screen',  desc: '2–3 poze deodată, schimbate pe ritm', bpm: 110, beats: 2, T: .3, render: renderSplitScreen, uniform: true, energy: 1 },
   letters:   { label: 'Pozele în litere', desc: 'Textul tău mare, cu pozele în el', bpm: 100, beats: 4, T: .1, render: renderLetters, energy: 1 },
   grid:      { label: 'Grilă',           desc: 'Pozele umplu o grilă, apoi zoom pe una', bpm: 110, beats: 1, T: .4, render: renderGrid, max: 9, duration: (n, beat) => Math.min(n, 9) * Math.max(beat, .45) + 5 * beat, energy: 1 },
 };
@@ -506,33 +583,86 @@ function reelPlan() {
   let fit = Math.max(1, Math.round(anim.beats * 60 / anim.bpm / beat));
   // above ~140 BPM a detected tempo may be double the real one: change photos on even beats only
   if (60 / beat > 140 && fit > 1 && fit % 2) fit++;
-  const beats = ps.length > 12 ? Math.max(1, fit - 1) : fit, D = beats * beat;
+  const beats = ps.length > 12 ? Math.max(1, fit - 1) : fit, D = beats * beat, T = Math.min(anim.T, D * .45);
+  // A photo stays D seconds; a video clip stays its own (trimmed) length, snapped to whole beats.
+  // Packs that show several pictures at once keep every slot at D and loop the clips instead.
+  const uniform = !!(anim.uniform || anim.duration);
+  const slotDur = (p, j) => !p.video || uniform ? D : Math.max(D, Math.round((clipLen(p) - (j ? T : 0)) / beat) * beat);
   let slots = ps;
-  if (anim.repeat && ps.length) { slots = []; while (slots.length < Math.max(anim.repeat, ps.length)) slots.push(...ps); }
-  const main = anim.duration ? anim.duration(ps.length, beat) : slots.length * D;
+  if (anim.repeat && ps.length) {
+    slots = []; let len = 0;
+    while (slots.length < ps.length || len < anim.repeat * D) for (const p of ps) { len += slotDur(p, slots.length); slots.push(p); }
+  }
+  const starts = [], durs = []; let acc = 0;
+  slots.forEach((p, j) => { starts.push(acc); durs.push(slotDur(p, j)); acc += durs[j]; });
+  const main = anim.duration ? anim.duration(ps.length, beat) : acc;
   const outro = placeName() || logo ? Math.ceil(2.4 / beat) * beat : 0;
-  return { ps, slots, D, T: Math.min(anim.T, D * .45), beat, anim, main, outro, total: main + outro };
+  return { ps, slots, starts, durs, uniform, D, T, beat, anim, main, outro, total: main + outro };
 }
+// Which second of each clip is on screen at time t (a clip that appears more than once follows its nearest slot).
+function videoTimes(t, plan) {
+  const m = new Map(), { slots, starts, durs, T } = plan;
+  slots.forEach((p, j) => {
+    if (!p.video) return;
+    const len = clipLen(p), from = starts[j] - (j && !plan.uniform ? T : 0); // an incoming clip already plays during the transition
+    const dist = t < from ? from - t : Math.max(0, t - starts[j] - durs[j]);
+    const local = plan.uniform ? ((t % len) + len) % len : clamp(t - starts[j] + (j ? T : 0), 0, len);
+    const cur = m.get(p);
+    if (!cur || dist < cur.dist) m.set(p, { time: Math.min(p.video.vin + local, p.video.vout - .04), dist, active: dist === 0 && t < plan.main });
+  });
+  return m;
+}
+// Live preview: clips play in real time and are resynced only when they drift.
+function syncVideosLive(t, plan) {
+  for (const [p, { time, active }] of videoTimes(t, plan)) {
+    const v = p.video.el;
+    if (active) {
+      if (Math.abs(v.currentTime - time) > .3 && !v.seeking) v.currentTime = time;
+      if (v.paused) v.play().catch(() => {});
+    } else {
+      if (!v.paused) v.pause();
+      if (Math.abs(v.currentTime - time) > .05 && !v.seeking) v.currentTime = time;
+    }
+    drawVideoFrame(p); p.vkey = '';
+  }
+}
+// Export and stills: every clip is moved to the exact frame before drawing.
+async function prepareVideoFrames(t, plan) {
+  for (const [p, { time }] of videoTimes(t, plan)) {
+    const key = curKey() + '|' + time.toFixed(3);
+    if (p.vkey === key) continue;
+    const v = p.video.el; if (!v.paused) v.pause();
+    await seekVideo(v, time); drawVideoFrame(p); p.vkey = key;
+  }
+}
+function pauseVideos() { photos.forEach(p => { if (p.video && !p.video.el.paused) p.video.el.pause(); }); }
+const frameOf = p => p.video ? p.vcv : graded(p);
 const hrand = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 const easeOutBack = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
 const lerp = (a, b, k) => a + (b - a) * k;
 const bufs = {};
 function buf(name, W, H) { let b = bufs[name]; if (!b || b.width !== W || b.height !== H) b = bufs[name] = mk(W, H); return b; }
 // Which slot is on screen at time t, and how far into the transition to the next one (0 = none).
+function slotAt(t, plan) {
+  const s = plan.starts; let lo = 0, hi = s.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (s[m] <= t) lo = m; else hi = m - 1; }
+  return lo;
+}
 function seqState(t, plan) {
-  const { slots, D, T } = plan, n = slots.length, i = Math.max(0, Math.min(n - 1, Math.floor(t / D))), local = t - i * D;
-  return { i, n, local, prog: clamp(local / D), r: i < n - 1 && local > D - T ? (local - (D - T)) / T : 0 };
+  const { slots, starts, durs, T } = plan, n = slots.length, i = slotAt(t, plan), local = t - starts[i], d = durs[i];
+  return { i, n, local, d, prog: clamp(local / d), r: i < n - 1 && local > d - T ? (local - (d - T)) / T : 0 };
 }
 function blurMidOf(p) {
+  if (p.video) return liveSmall(p, 'vmid', 110);
   const key = 'mid_' + curKey(); if (p.graded[key]) return p.graded[key];
-  const src = graded(p); if (p.graded[key]) return p.graded[key];
+  const src = frameOf(p); if (p.graded[key]) return p.graded[key];
   const t = mk(110, Math.max(2, Math.round(110 * src.height / src.width)));
   t.getContext('2d').drawImage(src, 0, 0, t.width, t.height);
   return p.graded[key] = t;
 }
 
 function drawReelPhoto(ctx, p, i, prog, W, H, anim = {}, extra = 0) {
-  const src = graded(p), kb = anim.kb ?? .12;
+  const src = frameOf(p), kb = anim.kb ?? .12;
   let zoom = (1.03 + kb * (i % 2 ? 1 - prog : prog)) * (1 + extra), rot = 0;
   const pan = ((i % 3) - 1) * (prog - .5) * 1.4;
   if (anim.ramp) zoom *= 1 + .38 * (1 - (1 - Math.pow(1 - clamp(prog / .34), 4)));
@@ -773,9 +903,9 @@ function applyPost(ctx, anim, t, beat) {
 
 /* freeze flash: the picture freezes with a camera flash and becomes a printed photo */
 function renderFreeze(ctx, t, plan, W, H, st) {
-  const { slots, D } = plan, { i, local } = seqState(t, plan), p = slots[i], tf = D * .45;
-  if (local < tf) { drawReelPhoto(ctx, p, i, local / D, W, H, { kb: .12 }); return; }
-  const k = local - tf, e = easeOutBack(clamp(k / .35)), frozen = tf / D;
+  const { slots, D } = plan, { i, local, d } = seqState(t, plan), p = slots[i], tf = d - D * .55;
+  if (local < tf) { drawReelPhoto(ctx, p, i, local / d, W, H, { kb: .12 }); return; }
+  const k = local - tf, e = easeOutBack(clamp(k / .35)), frozen = tf / d;
   blurredBg(ctx, p, W, H, .45);
   const s = 1 - .14 * e, m = W * .035 * e;
   ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate((i % 2 ? 1 : -1) * .045 * e); ctx.scale(s, s);
@@ -792,8 +922,8 @@ function renderSplitScreen(ctx, t, plan, W, H, st) {
     const y = j * (ph + gap), local = t - step * D - j * .09, e = ease(clamp(local / .45)), dir = j % 2 ? -1 : 1;
     const cur = slots[(step + j) % n], prev = slots[(step - 1 + j + n * 4) % n];
     ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, ph); ctx.clip();
-    if (step > 0 && e < 1) drawCover(ctx, graded(prev), -dir * e * W, y, W, ph, 1.08);
-    drawCover(ctx, graded(cur), dir * (1 - (step > 0 ? e : 1)) * W, y, W, ph, 1.04 + .06 * clamp((t - step * D) / D), (j - 1) * .3, 0);
+    if (step > 0 && e < 1) drawCover(ctx, frameOf(prev), -dir * e * W, y, W, ph, 1.08);
+    drawCover(ctx, frameOf(cur), dir * (1 - (step > 0 ? e : 1)) * W, y, W, ph, 1.04 + .06 * clamp((t - step * D) / D), (j - 1) * .3, 0);
     ctx.restore();
   }
 }
@@ -889,7 +1019,7 @@ function renderCard3D(ctx, t, plan, W, H) {
   }
   blurredBg(ctx, slots[k], W, H, .35);
   const cw = W * .78, ch = cw * 1.3, cy = H * .5 + Math.sin(t * 1.6) * H * .01;
-  drawCard3D(ctx, graded(slots[k]), W / 2, cy, cw, ch, ang);
+  drawCard3D(ctx, frameOf(slots[k]), W / 2, cy, cw, ch, ang);
 }
 function renderCoverflow(ctx, t, plan, W, H) {
   const { slots } = plan, { i, r, n } = seqState(t, plan), f = i + ease(r);
@@ -899,7 +1029,7 @@ function renderCoverflow(ctx, t, plan, W, H) {
   items.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
   for (const [j, o] of items) {
     const a = Math.min(1, Math.abs(o)), cw = W * .6 * (1 - a * .22), ch = cw * 1.35;
-    drawCard3D(ctx, graded(slots[j]), W / 2 + Math.sign(o) * Math.pow(Math.abs(o), .8) * W * .36, H * .5, cw, ch, clamp(-o * .95, -1.05, 1.05), a * .25);
+    drawCard3D(ctx, frameOf(slots[j]), W / 2 + Math.sign(o) * Math.pow(Math.abs(o), .8) * W * .36, H * .5, cw, ch, clamp(-o * .95, -1.05, 1.05), a * .25);
   }
 }
 function renderFilmstrip(ctx, t, plan, W, H) {
@@ -913,14 +1043,14 @@ function renderFilmstrip(ctx, t, plan, W, H) {
   for (let y = -H * .2 - off; y < H * 1.2; y += hp) for (const x of [x0 - side * .72, x0 + sw + side * .3]) { ctx.beginPath(); rrect(ctx, x, y, hole * 1.2, hole, 5); ctx.fill(); }
   for (let j = 0; j < n; j++) {
     const y = H / 2 + (j - f) * pitch - fh / 2; if (y > H * 1.2 || y + fh < -H * .2) continue;
-    drawCover(ctx, graded(slots[j]), x0, y, sw, fh, 1.04);
+    drawCover(ctx, frameOf(slots[j]), x0, y, sw, fh, 1.04);
     const dimA = Math.min(.6, Math.abs(j - f) * .5); if (dimA > .01) { ctx.fillStyle = `rgba(10,8,6,${dimA})`; ctx.fillRect(x0, y, sw, fh); }
   }
   ctx.restore();
   lightLeak(ctx, W, H, Math.sin(Math.PI * r) * .9, r);
 }
 function renderPhone(ctx, t, plan, W, H, st) {
-  const { slots, D } = plan, { i, r, n, prog } = seqState(t, plan);
+  const { slots } = plan, { i, r, n, prog } = seqState(t, plan);
   const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, st.bg); g.addColorStop(1, st.accent); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = .55; drawCover(ctx, blurredOf(slots[r > .5 ? i + 1 : i]), 0, 0, W, H, 1.2); ctx.globalAlpha = 1;
   const pw = W * .74, ph = Math.min(H * .86, pw * 2.05), rad = pw * .13, m = pw * .035;
@@ -931,13 +1061,13 @@ function renderPhone(ctx, t, plan, W, H, st) {
   const sx = -pw / 2 + m, sy = -ph / 2 + m, sw = pw - 2 * m, sh = ph - 2 * m;
   ctx.save(); ctx.beginPath(); rrect(ctx, sx, sy, sw, sh, rad - m); ctx.clip();
   const q = ease(r), z = 1.04 + .06 * prog;
-  drawCover(ctx, graded(slots[i]), sx, sy - q * sh, sw, sh, z);
-  if (r > 0) drawCover(ctx, graded(slots[i + 1]), sx, sy + sh * (1 - q), sw, sh, 1.04);
+  drawCover(ctx, frameOf(slots[i]), sx, sy - q * sh, sw, sh, z);
+  if (r > 0) drawCover(ctx, frameOf(slots[i + 1]), sx, sy + sh * (1 - q), sw, sh, 1.04);
   const sg = ctx.createLinearGradient(0, sy, 0, sy + sh * .16); sg.addColorStop(0, 'rgba(0,0,0,.45)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = sg; ctx.fillRect(sx, sy, sw, sh * .16);
   // story progress bars
   const segs = Math.min(n, 12), bw = (sw - m * 2 - (segs - 1) * 6) / segs, fillIdx = Math.min(segs - 1, Math.floor(i * segs / n));
   for (let k = 0; k < segs; k++) {
-    const x = sx + m + k * (bw + 6), y = sy + sh * .045, fillW = k < fillIdx ? 1 : k === fillIdx ? clamp((t - (i * D)) / D) : 0;
+    const x = sx + m + k * (bw + 6), y = sy + sh * .045, fillW = k < fillIdx ? 1 : k === fillIdx ? prog : 0;
     ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(x, y, bw, 5); ctx.fillStyle = '#fff'; ctx.fillRect(x, y, bw * fillW, 5);
   }
   // like button that pops on every beat
@@ -961,13 +1091,13 @@ function renderScrapbook(ctx, t, plan, W, H, st) {
   const step = H * .34, ink = '#E4572E';
   ctx.save(); ctx.translate(0, -f * step);
   for (let j = Math.max(0, i - 2); j <= Math.min(n - 1, i + 1); j++) {
-    const s = t - j * D; if (s < 0) continue;
+    const s = t - plan.starts[j]; if (s < 0) continue;
     const e = easeOutBack(clamp(s / .45)), cx = W * (j % 2 ? .6 : .4) + (hrand(j) - .5) * W * .1, cy = H * .48 + j * step;
     const w = W * .64, h = w * 1.18, m = w * .05, rot = (hrand(j * 2.1) - .5) * .3;
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(e, e);
     ctx.shadowColor = 'rgba(60,40,20,.3)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
     ctx.fillStyle = '#fff'; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.shadowColor = 'transparent';
-    drawCover(ctx, graded(slots[j]), -w / 2 + m, -h / 2 + m, w - 2 * m, h * .82 - m);
+    drawCover(ctx, frameOf(slots[j]), -w / 2 + m, -h / 2 + m, w - 2 * m, h * .82 - m);
     ctx.fillStyle = 'rgba(244,227,161,.8)';
     for (const sx of [-1, 1]) { ctx.save(); ctx.translate(sx * w * .4, -h / 2); ctx.rotate(sx * .6); ctx.fillRect(-w * .12, -h * .03, w * .24, h * .06); ctx.restore(); }
     // hand-drawn doodle that draws itself in
@@ -986,8 +1116,8 @@ function renderScrapbook(ctx, t, plan, W, H, st) {
   ctx.restore();
 }
 function renderLetters(ctx, t, plan, W, H, st) {
-  const { slots, D } = plan, { i, local } = seqState(t, plan), p = slots[i], prog = clamp(local / D);
-  const z = local < D * .5 ? 0 : Math.pow(ease(clamp((local - D * .5) / (D * .5))), 3), s = 1 + z * 40;
+  const { slots, D } = plan, { i, local, d } = seqState(t, plan), p = slots[i], prog = clamp(local / d), zs = d - D * .5;
+  const z = local < zs ? 0 : Math.pow(ease(clamp((local - zs) / (D * .5))), 3), s = 1 + z * 40;
   ctx.fillStyle = st.bg; ctx.fillRect(0, 0, W, H);
   const full = clamp((s - 1) / 7);
   if (full > 0) { ctx.globalAlpha = full; drawReelPhoto(ctx, p, i, prog, W, H, { kb: .08 }); ctx.globalAlpha = 1; }
@@ -1031,7 +1161,7 @@ function renderGrid(ctx, t, plan, W, H, st) {
     const e = easeOutBack(clamp(s / .4)), { x, y } = cell(j), rad = 18 * (1 - z);
     ctx.save(); ctx.translate(x + cw / 2, y + ch / 2); ctx.rotate((1 - clamp(s / .4)) * .25); ctx.scale(e, e);
     if (z < .5) { ctx.shadowColor = 'rgba(0,0,0,.3)'; ctx.shadowBlur = 20; ctx.fillStyle = st.bg; ctx.beginPath(); rrect(ctx, -cw / 2, -ch / 2, cw, ch, rad); ctx.fill(); ctx.shadowColor = 'transparent'; }
-    drawCover(ctx, graded(p), -cw / 2, -ch / 2, cw, ch, j === target ? 1.02 + .06 * z : 1.02, 0, 0, rad);
+    drawCover(ctx, frameOf(p), -cw / 2, -ch / 2, cw, ch, j === target ? 1.02 + .06 * z : 1.02, 0, 0, rad);
     ctx.restore();
   });
   ctx.restore();
@@ -1039,13 +1169,13 @@ function renderGrid(ctx, t, plan, W, H, st) {
 
 /* polaroid pack: photos drop in as instant-film cards and pile up */
 function renderPolaroid(ctx, t, plan, W, H, st) {
-  const { slots, D } = plan, n = slots.length, cur = Math.max(0, Math.min(n - 1, Math.floor(t / D)));
+  const { slots, D } = plan, cur = slotAt(t, plan);
   drawCover(ctx, blurredOf(slots[cur]), 0, 0, W, H, 1.2);
   ctx.fillStyle = 'rgba(20,16,12,.35)'; ctx.fillRect(0, 0, W, H);
   const cam = 1 + .05 * (t / plan.total), title = placeName();
   ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam, cam); ctx.translate(-W / 2, -H / 2);
   for (let i = Math.max(0, cur - 4); i <= cur; i++) {
-    const s = t - i * D; if (s < 0) continue;
+    const s = t - plan.starts[i]; if (s < 0) continue;
     const k = clamp(s / .7), e = easeOutBack(k), sd = i * 7.13 + seed;
     const rot0 = (hrand(sd) - .5) * .24, cx = W / 2 + (hrand(sd + 1) - .5) * W * .14, cy = H * .48 + (hrand(sd + 2) - .5) * H * .06;
     const cw = W * .8, ch = cw * 1.22, m = cw * .055;
@@ -1053,7 +1183,7 @@ function renderPolaroid(ctx, t, plan, W, H, st) {
     ctx.translate(cx, cy - (1 - e) * H * .95); ctx.rotate(rot0 + (1 - k) * .55 * (i % 2 ? 1 : -1)); ctx.scale(1 + (1 - k) * .18, 1 + (1 - k) * .18);
     ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 14;
     ctx.fillStyle = '#FBF9F4'; ctx.fillRect(-cw / 2, -ch / 2, cw, ch); ctx.shadowColor = 'transparent';
-    drawCover(ctx, graded(slots[i]), -cw / 2 + m, -ch / 2 + m, cw - 2 * m, ch * .8 - m, 1.02 + .05 * clamp(s / (D * 2)));
+    drawCover(ctx, frameOf(slots[i]), -cw / 2 + m, -ch / 2 + m, cw - 2 * m, ch * .8 - m, 1.02 + .05 * clamp(s / (D * 2)));
     if (title) { ctx.fillStyle = '#3a342c'; ctx.textAlign = 'center'; ctx.font = `400 ${Math.round(cw * .065)}px "Special Elite", monospace`; ctx.fillText(title, 0, ch / 2 - ch * .075); }
     ctx.restore();
   }
@@ -1065,15 +1195,15 @@ function renderReel(ctx, t, plan) {
   const W = ctx.canvas.width, H = ctx.canvas.height, st = curStyle(), { slots, D, T, anim, beat, main } = plan, n = slots.length;
   ctx.fillStyle = st.bg; ctx.fillRect(0, 0, W, H);
   if (!n) return;
-  const prog = i => clamp((t - (i * D - T)) / (D + T));
+  const prog = i => clamp((t - (plan.starts[i] - T)) / (plan.durs[i] + T));
   const pulse = anim.pulse ? anim.pulse * Math.exp(-(t % beat) * 7) : 0;
   if (anim.render) anim.render(ctx, t, plan, W, H, st);
   else if (t < main) {
-    const i = Math.min(n - 1, Math.floor(t / D)), local = t - i * D;
+    const { i, local, d } = seqState(t, plan);
     ctx.save();
     if (anim.beatShake) { const a = anim.beatShake * Math.exp(-(t % beat) * 9) * W, f = Math.floor(t * 60); ctx.translate((hrand(f) - .5) * a, (hrand(f + 5) - .5) * a); }
-    if (i < n - 1 && local > D - T) {
-      const r = (local - (D - T)) / T, A = buf('a', W, H), B = buf('b', W, H);
+    if (i < n - 1 && local > d - T) {
+      const r = (local - (d - T)) / T, A = buf('a', W, H), B = buf('b', W, H);
       drawReelPhoto(A.getContext('2d'), slots[i], i, prog(i), W, H, anim, pulse);
       drawReelPhoto(B.getContext('2d'), slots[i + 1], i + 1, prog(i + 1), W, H, anim, 0);
       if (anim.shake) { const b = Math.sin(Math.PI * r), f = Math.floor(t * 60); ctx.translate((hrand(f) - .5) * W * .035 * b, (hrand(f + 9) - .5) * W * .035 * b); }
@@ -1296,17 +1426,17 @@ function renderMusic() {
 /* ---------- reel playback & recording ---------- */
 const reelCv = $('#reelCv'), rctx = reelCv.getContext('2d');
 let playing = null;
-function stopReel() { if (!playing) return; cancelAnimationFrame(playing.raf); playing.music?.stop(); playing = null; $('#playBtn').textContent = '▶ Previzualizează'; $('#playBtn').hidden = false; }
+function stopReel() { pauseVideos(); if (!playing) return; cancelAnimationFrame(playing.raf); playing.music?.stop(); playing = null; $('#playBtn').textContent = '▶ Previzualizează'; $('#playBtn').hidden = false; }
 function playReel({ record = false, onDone } = {}) {
-  stopReel();
+  stopReel(); closeTrim();
   const plan = reelPlan(), music = startMusic(plan.total, record), t0 = performance.now();
   playing = { music, raf: 0 };
   if (record) $('#playBtn').hidden = true;
   const frame = now => {
     // Chrome can hand the first frame a timestamp from before t0, so never let t go negative.
     const t = Math.max(0, (now - t0) / 1000);
-    if (t >= plan.total) { renderReel(rctx, plan.total - .001, plan); const m = playing?.music; playing = null; m?.stop(); $('#playBtn').hidden = false; $('#playBtn').textContent = '▶ Previzualizează'; onDone?.(); return; }
-    try { renderReel(rctx, t, plan); } catch (e) { console.error('Reel frame', e); }
+    if (t >= plan.total) { pauseVideos(); renderReel(rctx, plan.total - .001, plan); const m = playing?.music; playing = null; m?.stop(); $('#playBtn').hidden = false; $('#playBtn').textContent = '▶ Previzualizează'; onDone?.(); return; }
+    try { syncVideosLive(t, plan); renderReel(rctx, t, plan); } catch (e) { console.error('Reel frame', e); }
     if (record) $('#recProg i').style.width = (t / plan.total * 100) + '%';
     playing.raf = requestAnimationFrame(frame);
   };
@@ -1314,7 +1444,12 @@ function playReel({ record = false, onDone } = {}) {
   if (!record) $('#playBtn').textContent = '■ Oprește';
   return music;
 }
-function renderReelStill() { const plan = reelPlan(); renderReel(rctx, Math.min(plan.D * .7, plan.total), plan); }
+let exporting = false, stillJob = 0;
+function renderReelStill() {
+  const plan = reelPlan(), t = Math.min(plan.D * .7, plan.total), job = ++stillJob;
+  renderReel(rctx, t, plan);
+  if (plan.slots.some(p => p.video)) prepareVideoFrames(t, plan).then(() => { if (job === stillJob && !playing && !exporting) renderReel(rctx, t, plan); });
+}
 const FPS = 30;
 async function mp4VideoCodec() {
   if (!window.VideoEncoder || !window.VideoFrame || !window.Mp4Muxer) return null;
@@ -1350,8 +1485,10 @@ async function exportReelMp4(vcodec) {
   let failed = null;
   const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => { failed = e; } });
   venc.configure({ codec: vcodec, width: W, height: H, bitrate: 6e6, framerate: FPS, avc: { format: 'avc' } });
+  const hasVideo = plan.slots.some(p => p.video);
   for (let f = 0; f < frames; f++) {
     if (failed) throw failed;
+    if (hasVideo) await prepareVideoFrames(f / FPS, plan);
     renderReel(cx, f / FPS, plan);
     const vf = new VideoFrame(cv, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
     venc.encode(vf, { keyFrame: f % (FPS * 2) === 0 }); vf.close();
@@ -1382,12 +1519,15 @@ async function recordReel() {
   if (vcodec) {
     $('#reelVideo').hidden = true; reelCv.hidden = false; $('#playBtn').hidden = true; $('#recProg').hidden = false;
     try {
+      exporting = true;
       const blob = await exportReelMp4(vcodec);
+      exporting = false;
       reelBlob = blob; reelExt = 'mp4';
       $('#recProg').hidden = true; $('#playBtn').hidden = false; renderReelStill();
       toast('Video-ul e gata. Apasă „Salvează video”.');
       return blob;
     } catch (e) {
+      exporting = false;
       console.error('MP4 export', e);
       $('#recProg').hidden = true; $('#playBtn').hidden = false;
     }
@@ -1449,14 +1589,64 @@ function renderStrip() {
     b.type = 'button'; b.className = 'thumb ' + (s === 'keep' ? 'keep' : 'off');
     b.setAttribute('aria-label', `Poza ${p.id}: ${L[s]}. Atinge ca să schimbi.`);
     b.innerHTML = `<img alt=""><span class="badge ${s}">${L[s]}</span>`; b.querySelector('img').src = p.thumb;
-    b.onclick = () => { p.manual = s === 'keep' ? 'off' : 'keep'; refresh(); };
+    if (p.video) {
+      const vb = document.createElement('span'); vb.className = 'vbadge'; vb.textContent = '▶ ' + mmss(clipLen(p)); b.append(vb);
+      b.setAttribute('aria-label', `Video ${p.id}, ${mmss(clipLen(p))}: ${L[s]}. Atinge ca să-l tai.`);
+      if (trimP === p) b.classList.add('open');
+      b.onclick = () => openTrim(p);
+    } else b.onclick = () => { p.manual = s === 'keep' ? 'off' : 'keep'; refresh(); };
     strip.append(b);
   });
+  const nv = photos.filter(p => p.video).length, np = photos.length - nv;
   const k = photos.filter(p => status(p) === 'keep').length, bl = photos.filter(p => status(p) === 'blur').length, d = photos.filter(p => status(p) === 'dup').length;
   $('#summary').textContent = photos.length
-    ? `${photos.length} poze · ${k} alese` + (bl ? ` · ${bl} neclare` : '') + (d ? ` · ${d} dubluri` : '') + (k > MAX.colaj ? ` · colajul folosește cele mai bune ${MAX.colaj}` : '') + (k > MAX.carusel ? ` · caruselul ia cele mai bune ${MAX.carusel}` : '')
+    ? [np && `${np} ${np === 1 ? 'poză' : 'poze'}`, nv && `${nv} video`].filter(Boolean).join(' și ') + ` · ${k} alese` + (bl ? ` · ${bl} neclare` : '') + (d ? ` · ${d} dubluri` : '') + (k > MAX.colaj ? ` · colajul folosește cele mai bune ${MAX.colaj}` : '') + (k > MAX.carusel ? ` · caruselul ia cele mai bune ${MAX.carusel}` : '')
     : 'Nicio poză încă. Apasă „Fă o poză”.';
 }
+let trimP = null, trimRaf = 0;
+const mmssd = s => Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0');
+function trimLabels() {
+  const v = trimP.video;
+  $('#trimInLbl').textContent = 'Începe la ' + mmssd(v.vin);
+  $('#trimOutLbl').textContent = 'Se termină la ' + mmssd(v.vout);
+  $('#trimLen').textContent = `${mmssd(v.vout - v.vin)} din ${mmssd(v.dur)}`;
+  $('#trimToggle').textContent = status(trimP) === 'keep' ? 'Scoate clipul' : 'Pune clipul înapoi';
+}
+function openTrim(p) {
+  if (trimP === p) { closeTrim(); return; }
+  stopReel(); closeTrim(); trimP = p;
+  const v = p.video, el = v.el, box = $('#trimBox');
+  box.replaceChildren(el); el.controls = false;
+  for (const id of ['#trimIn', '#trimOut']) { const r = $(id); r.max = v.dur.toFixed(1); r.step = v.dur > 60 ? '0.5' : '0.1'; }
+  $('#trimIn').value = v.vin; $('#trimOut').value = v.vout;
+  el.currentTime = v.vin; trimLabels();
+  $('#trim').hidden = false; renderStrip();
+  $('#trim').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function closeTrim() {
+  if (!trimP) return;
+  cancelAnimationFrame(trimRaf); trimP.video.el.pause(); trimP.video.el.remove();
+  trimP = null; $('#trim').hidden = true; $('#trimPlay').textContent = '▶ Vezi bucata'; renderStrip();
+}
+function trimChanged() { trimLabels(); reelBlob = null; renderStrip(); scheduleRender(); }
+$('#trimIn').oninput = e => {
+  const v = trimP.video; v.vin = Math.min(+e.target.value, v.vout - .5); e.target.value = v.vin;
+  v.el.pause(); v.el.currentTime = v.vin; trimChanged();
+};
+$('#trimOut').oninput = e => {
+  const v = trimP.video; v.vout = Math.min(v.dur, Math.max(+e.target.value, v.vin + .5)); e.target.value = v.vout;
+  v.el.pause(); v.el.currentTime = Math.max(v.vin, v.vout - .05); trimChanged();
+};
+$('#trimAll').onclick = () => { const v = trimP.video; v.vin = 0; v.vout = v.dur; $('#trimIn').value = 0; $('#trimOut').value = v.dur; v.el.currentTime = 0; trimChanged(); };
+$('#trimToggle').onclick = () => { trimP.manual = status(trimP) === 'keep' ? 'off' : 'keep'; trimLabels(); refresh(); };
+$('#trimDone').onclick = closeTrim;
+$('#trimPlay').onclick = () => {
+  const v = trimP.video, el = v.el, btn = $('#trimPlay');
+  if (!el.paused) { el.pause(); cancelAnimationFrame(trimRaf); btn.textContent = '▶ Vezi bucata'; return; }
+  el.currentTime = v.vin; el.play().catch(() => {}); btn.textContent = '■ Oprește';
+  const tick = () => { if (el.paused) { btn.textContent = '▶ Vezi bucata'; return; } if (el.currentTime >= v.vout) { el.pause(); el.currentTime = v.vin; btn.textContent = '▶ Vezi bucata'; return; } trimRaf = requestAnimationFrame(tick); };
+  trimRaf = requestAnimationFrame(tick);
+};
 function renderChips() {
   const box = $('#chips'); box.innerHTML = '<span class="lbl" style="align-self:center">Stil</span>';
   [['auto', 'Auto · ' + STYLES[autoStyle()].label], ...Object.entries(STYLES).map(([k, s]) => [k, s.label])].forEach(([k, l]) => {
@@ -1499,6 +1689,7 @@ function pickAnim(k) {
   if (!$('#reelbox').hidden) $('#reelbox').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 function refresh() { renderStrip(); renderChips(); renderAnimChips(); scheduleRender(); }
+const hasClips = () => chosen(MAX.reel).some(p => p.video);
 function updateSaveUI() {
   const n = chosen().length, btn = $('#saveBtn');
   $('#variantBtn').hidden = false;
@@ -1507,11 +1698,11 @@ function updateSaveUI() {
   $('#dockSave').textContent = btn.textContent; $('#dockSave').disabled = !n;
   $('#shareBtn').hidden = !canShareFiles(); $('#shareBtn').disabled = !n;
   const hint = !IN_ARTIFACT
-    ? (tab === 'reel' ? 'Video MP4 de ' + Math.round(reelPlan().total) + ' s, gata în câteva secunde. „Trimite” îl deschide direct în Instagram, TikTok sau WhatsApp.' : '„Salvează” pune pozele în Galerie. „Trimite” le deschide direct în Instagram, Facebook sau WhatsApp.')
+    ? (tab === 'reel' ? 'Video MP4 de ' + Math.round(reelPlan().total) + ' s, gata în câteva secunde' + (hasClips() ? ' (cu video-uri durează puțin mai mult)' : '') + '. „Trimite” îl deschide direct în Instagram, TikTok sau WhatsApp.' : '„Salvează” pune pozele în Galerie. „Trimite” le deschide direct în Instagram, Facebook sau WhatsApp.')
     : !caps.downloads
     ? (tab === 'reel' ? 'Video-ul se creează în timp real, cât durează animația.' : 'Ține degetul apăsat pe imagine și alege „Salvează imaginea”.')
     : tab === 'carusel' ? 'Le salvezi pe toate odată sau atingi un slide ca să-l salvezi doar pe el.'
-    : tab === 'reel' ? 'Video MP4 de ' + Math.round(reelPlan().total) + ' s, gata în câteva secunde.' : '';
+    : tab === 'reel' ? 'Video MP4 de ' + Math.round(reelPlan().total) + ' s, gata în câteva secunde' + (hasClips() ? ' (cu video-uri durează puțin mai mult).' : '.') : '';
   $('#saveHint').textContent = hint + (tab === 'reel' && reelBlob && reelExt === 'webm' ? ' Browserul a creat un fișier .webm; dacă Instagram nu-l acceptă, deschide aplicația din Chrome sau Safari actualizat.' : '');
 }
 
@@ -1656,17 +1847,25 @@ function loadSamples() {
 }
 
 /* ---------- events ---------- */
+const isVideoFile = f => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|3gp)$/i.test(f.name);
 async function addFiles(files) {
-  files = [...files].filter(f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic)$/i.test(f.name)); if (!files.length) return;
+  files = [...files].filter(f => isVideoFile(f) || f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic)$/i.test(f.name)); if (!files.length) return;
   if (isSample) { photos = []; isSample = false; $('#sampleBanner').hidden = true; if (!placeTouched) $('#place').value = ''; }
-  $('#summary').innerHTML = '<span class="spin"></span> Analizez pozele…';
-  for (const f of files) { try { addPhotoCanvas(await fileToCanvas(f)); } catch { toast('O poză nu a putut fi citită (format nesuportat).'); } }
+  stopReel();
+  let np = 0, nv = 0;
+  for (const f of files) {
+    const vid = isVideoFile(f);
+    $('#summary').innerHTML = `<span class="spin"></span> ${vid ? 'Citesc video-ul…' : 'Analizez pozele…'}`;
+    try { if (vid) { addVideoClip(await fileToVideo(f)); nv++; } else { addPhotoCanvas(await fileToCanvas(f)); np++; } }
+    catch { toast(vid ? 'Un video nu a putut fi citit. Încearcă un MP4 filmat cu telefonul.' : 'O poză nu a putut fi citită (format nesuportat).'); }
+  }
   classify(); refresh();
-  toast(`${files.length === 1 ? 'Poză adăugată' : files.length + ' poze adăugate'}. Postarea s-a actualizat.`);
+  const parts = [np && (np === 1 ? '1 poză' : np + ' poze'), nv && (nv === 1 ? '1 video' : nv + ' video-uri')].filter(Boolean);
+  if (parts.length) toast(`Am adăugat ${parts.join(' și ')}. Postarea s-a actualizat.`);
 }
 $('#camIn').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
 $('#galIn').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
-$('#clearBtn').onclick = () => { photos = []; isSample = false; $('#sampleBanner').hidden = true; refresh(); };
+$('#clearBtn').onclick = () => { closeTrim(); stopReel(); photos = []; isSample = false; $('#sampleBanner').hidden = true; refresh(); };
 $('#place').oninput = () => { placeTouched = true; try { localStorage.setItem('cr_text', $('#place').value); } catch {} scheduleRender(); };
 function setLogo(c) {
   logo = c; const prev = $('#logoPrev');
