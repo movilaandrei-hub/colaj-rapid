@@ -566,18 +566,18 @@ const ANIMS = {
   splitscreen: { label: 'Split screen',  desc: '2–3 poze deodată, schimbate pe ritm', bpm: 110, beats: 2, T: .3, render: renderSplitScreen, uniform: true, energy: 1 },
   letters:   { label: 'Pozele în litere', desc: 'Textul tău mare, cu pozele în el', bpm: 100, beats: 4, T: .1, render: renderLetters, energy: 1 },
   // CapCut-style cuts for video: full-screen clips, one strong transition with speed blur
-  vmix:      { label: 'Mix CapCut',      desc: 'Altă tranziție la fiecare tăietură', bpm: 112, beats: 3, T: .55, trans: ['czoomin', 'cwhipl', 'cspin', 'ccube', 'czoomout', 'cwhipu', 'cstretch', 'cslide', 'cblur', 'cwhipr'], pulse: .03, kb: .04, energy: 2 },
-  vzoomin:   { label: 'Zoom in',         desc: 'Intră în imagine cu blur de viteză', bpm: 112, beats: 3, T: .5, trans: ['czoomin'], pulse: .03, kb: .04, energy: 2 },
-  vzoomout:  { label: 'Zoom out',        desc: 'Iese din imagine, cu oglindiri pe margini', bpm: 112, beats: 3, T: .55, trans: ['czoomout'], kb: .04, energy: 2 },
-  vwhip:     { label: 'Whip pan',        desc: 'Glisare foarte rapidă cu blur, stânga-dreapta', bpm: 118, beats: 3, T: .4, trans: ['cwhipl', 'cwhipr'], kb: .04, energy: 2 },
-  vwhipv:    { label: 'Whip sus-jos',    desc: 'Glisare rapidă pe verticală, ca la TikTok', bpm: 118, beats: 3, T: .4, trans: ['cwhipu', 'cwhipd'], kb: .04, energy: 2 },
-  vspin:     { label: 'Rotire 360°',     desc: 'Imaginea se învârte cu blur și sare la următoarea', bpm: 118, beats: 3, T: .55, trans: ['cspin'], kb: .04, energy: 2 },
-  vcube:     { label: 'Cub 3D',          desc: 'Se rotește ca o cutie în spațiu', bpm: 104, beats: 3, T: .7, trans: ['ccube'], kb: .04, energy: 1 },
-  vstretch:  { label: 'Întindere',       desc: 'Se întinde ca un elastic și trece la următoarea', bpm: 118, beats: 3, T: .45, trans: ['cstretch'], kb: .04, energy: 2 },
-  vslide:    { label: 'Glisare cu arc',  desc: 'Următorul cadru intră și sare puțin', bpm: 110, beats: 3, T: .6, trans: ['cslide'], kb: .04, energy: 1 },
-  vblur:     { label: 'Blur',            desc: 'Se încețoșează și apare următorul', bpm: 96, beats: 4, T: .7, trans: ['cblur'], kb: .05, energy: 0 },
-  vflash:    { label: 'Flash',           desc: 'Bliț alb cu zoom pe beat', bpm: 124, beats: 3, T: .35, trans: ['cflash'], pulse: .06, kb: .04, energy: 2 },
-  vshake:    { label: 'Glitch shake',    desc: 'Cadrul tremură cu culori decalate', bpm: 124, beats: 3, T: .4, trans: ['glitchgl', 'cshake'], shake: 1, kb: .04, energy: 2 },
+  vmix:      { label: 'Mix CapCut',      desc: 'Altă tranziție la fiecare tăietură', bpm: 112, beats: 3, T: .55, trans: ['czoomin', 'cwhipl', 'cspin', 'ccube', 'czoomout', 'cwhipu', 'cstretch', 'cslide', 'cblur', 'cwhipr'], pulse: .07, beatShake: .008, beatFlash: .12, kb: .04, cutClips: true, energy: 2 },
+  vzoomin:   { label: 'Zoom in',         desc: 'Intră în imagine cu blur de viteză', bpm: 112, beats: 3, T: .5, trans: ['czoomin'], pulse: .1, post: 'radial', kb: .04, cutClips: true, energy: 2 },
+  vzoomout:  { label: 'Zoom out',        desc: 'Iese din imagine, cu oglindiri pe margini', bpm: 112, beats: 3, T: .55, trans: ['czoomout'], kb: .04, pulse: .06, cutClips: true, energy: 2 },
+  vwhip:     { label: 'Whip pan',        desc: 'Glisare foarte rapidă cu blur, stânga-dreapta', bpm: 118, beats: 3, T: .4, trans: ['cwhipl', 'cwhipr'], kb: .04, beatShake: .02, pulse: .04, cutClips: true, energy: 2 },
+  vwhipv:    { label: 'Whip sus-jos',    desc: 'Glisare rapidă pe verticală, ca la TikTok', bpm: 118, beats: 3, T: .4, trans: ['cwhipu', 'cwhipd'], kb: .04, beatShake: .02, pulse: .04, cutClips: true, energy: 2 },
+  vspin:     { label: 'Rotire 360°',     desc: 'Imaginea se învârte cu blur și sare la următoarea', bpm: 118, beats: 3, T: .55, trans: ['cspin'], kb: .04, pulse: .07, post: 'radial', cutClips: true, energy: 2 },
+  vcube:     { label: 'Cub 3D',          desc: 'Se rotește ca o cutie în spațiu', bpm: 104, beats: 3, T: .7, trans: ['ccube'], kb: .04, pulse: .04, cutClips: true, energy: 1 },
+  vstretch:  { label: 'Întindere',       desc: 'Se întinde ca un elastic și trece la următoarea', bpm: 118, beats: 3, T: .45, trans: ['cstretch'], kb: .04, pulse: .08, cutClips: true, energy: 2 },
+  vslide:    { label: 'Glisare cu arc',  desc: 'Următorul cadru intră și sare puțin', bpm: 110, beats: 3, T: .6, trans: ['cslide'], kb: .04, pulse: .04, cutClips: true, energy: 1 },
+  vblur:     { label: 'Blur',            desc: 'Se încețoșează și apare următorul', bpm: 96, beats: 4, T: .7, trans: ['cblur'], kb: .05, post: 'wave', cutClips: true, energy: 0 },
+  vflash:    { label: 'Flash',           desc: 'Bliț alb cu zoom pe beat', bpm: 124, beats: 3, T: .35, trans: ['cflash'], pulse: .08, beatFlash: .45, kb: .04, cutClips: true, energy: 2 },
+  vshake:    { label: 'Glitch shake',    desc: 'Cadrul tremură cu culori decalate', bpm: 124, beats: 3, T: .4, trans: ['glitchgl', 'cshake'], shake: 1, beatShake: .035, post: 'pixel', pulse: .05, kb: .04, cutClips: true, energy: 2 },
   grid:      { label: 'Grilă',           desc: 'Pozele umplu o grilă, apoi zoom pe una', bpm: 110, beats: 1, T: .4, render: renderGrid, max: 9, duration: (n, beat) => Math.min(n, 9) * Math.max(beat, .45) + 5 * beat, energy: 1 },
 };
 const ANIM_GROUPS = [
@@ -608,11 +608,22 @@ function reelPlan() {
     slots = []; let len = 0;
     while (slots.length < ps.length || len < anim.repeat * D) for (const p of ps) { len += slotDur(p, slots.length); slots.push(p); }
   }
-  const starts = [], durs = []; let acc = 0;
-  slots.forEach((p, j) => { starts.push(acc); durs.push(slotDur(p, j)); acc += durs[j]; });
+  // CapCut-style packs chop long clips on the beat, so a single clip gets transitions too.
+  // clipT0 = second of the (trimmed) clip shown at the slot's start; a cut-up clip keeps running across its pieces.
+  const out = [], durs = [], clipT0 = [];
+  slots.forEach(p => {
+    const j = out.length, d = slotDur(p, j);
+    if (!p.video || !anim.cutClips || uniform || d < D * 1.6) { out.push(p); durs.push(d); clipT0.push(j ? T : 0); return; }
+    const total = Math.round(d / beat), n = Math.max(2, Math.round(d / D)), per = Math.floor(total / n);
+    let t0 = j ? T : 0;
+    for (let k = 0; k < n; k++) { const dk = (per + (k < total - per * n ? 1 : 0)) * beat; out.push(p); durs.push(dk); clipT0.push(t0); t0 += dk; }
+  });
+  slots = out;
+  const starts = []; let acc = 0;
+  durs.forEach(d => { starts.push(acc); acc += d; });
   const main = anim.duration ? anim.duration(ps.length, beat) : acc;
   const outro = placeName() || logo ? Math.ceil(2.4 / beat) * beat : 0;
-  return { ps, slots, starts, durs, uniform, D, T, beat, anim, main, outro, total: main + outro };
+  return { ps, slots, starts, durs, clipT0, uniform, D, T, beat, anim, main, outro, total: main + outro };
 }
 // Which second of each clip is on screen at time t (a clip that appears more than once follows its nearest slot).
 function videoTimes(t, plan) {
@@ -621,7 +632,7 @@ function videoTimes(t, plan) {
     if (!p.video) return;
     const len = clipLen(p), from = starts[j] - (j && !plan.uniform ? T : 0); // an incoming clip already plays during the transition
     const dist = t < from ? from - t : Math.max(0, t - starts[j] - durs[j]);
-    const local = plan.uniform ? ((t % len) + len) % len : clamp(t - starts[j] + (j ? T : 0), 0, len);
+    const local = plan.uniform ? ((t % len) + len) % len : clamp(plan.clipT0[j] + t - starts[j], 0, len);
     const cur = m.get(p);
     if (!cur || dist < cur.dist) m.set(p, { time: Math.min(p.video.vin + local, p.video.vout - .04), dist, active: dist === 0 && t < plan.main });
   });
@@ -1289,6 +1300,7 @@ function renderReel(ctx, t, plan) {
     ctx.restore();
   }
   if (anim.post && t < main) applyPost(ctx, anim, t, beat);
+  if (anim.beatFlash && t < main) { const k = Math.floor(t / beat + 1e-6) % 4 ? .5 : 1, a = anim.beatFlash * k * Math.exp(-(t % beat) * 12); if (a > .01) { ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, H); } }
   if (anim.leaks) lightLeak(ctx, W, H, .5, (t * .07) % 1.2);
   if (anim.dust) dust(ctx, W, H, t);
   if (curKey() === 'seara') {
