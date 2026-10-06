@@ -89,6 +89,10 @@ input:focus-visible,textarea:focus-visible,button:focus-visible,.btn:focus-visib
 .ownmusic{display:flex;flex-direction:column;gap:8px}
 .field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
 input[type=range]{width:100%;accent-color:var(--accent)}
+.vbuild{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;background:var(--sunk);border-radius:12px;padding:12px}
+.vbuild .lbl{font:600 11px/1.3 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.vbuild .chips .chip{background:var(--surface)}
+.vbuild .chip[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .autonote{grid-column:1/-1;font-size:13px;color:var(--muted);background:var(--sunk);border-radius:10px;padding:10px 12px}
 .chip[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .stage{background:var(--sunk);border-radius:12px;padding:12px;display:flex;justify-content:center;min-height:200px;align-items:center;position:relative}
@@ -591,6 +595,7 @@ const ANIMS = {
   vblur:     { label: 'Blur',            desc: 'Se încețoșează și apare următorul', bpm: 96, beats: 4, T: .7, trans: ['cblur'], kb: .05, post: 'wave', cutClips: true, energy: 0 },
   vflash:    { label: 'Flash',           desc: 'Bliț alb cu zoom pe beat', bpm: 124, beats: 3, T: .35, trans: ['cflash'], pulse: .08, beatFlash: .45, kb: .04, cutClips: true, energy: 2 },
   vshake:    { label: 'Glitch shake',    desc: 'Cadrul tremură cu culori decalate', bpm: 124, beats: 3, T: .4, trans: ['glitchgl', 'cshake'], shake: 1, beatShake: .035, post: 'pixel', pulse: .05, kb: .04, cutClips: true, energy: 2 },
+  vcustom:   { label: 'Combinația ta',   desc: 'Tranzițiile și efectele alese de tine', bpm: 115, beats: 3, T: .55, trans: ['czoomin'], kb: .04, cutClips: true, energy: 2 },
   grid:      { label: 'Grilă',           desc: 'Pozele umplu o grilă, apoi zoom pe una', bpm: 110, beats: 1, T: .4, render: renderGrid, max: 9, duration: (n, beat) => Math.min(n, 9) * Math.max(beat, .45) + 5 * beat, energy: 1 },
 };
 const ANIM_GROUPS = [
@@ -908,6 +913,9 @@ const GL_FX = {
     gl_FragColor = a / 12.0; }`,
   p_pixel: `void main() { float cy = mix(1280.0, 22.0, amount); vec2 cells = vec2(cy * ratio, cy);
     gl_FragColor = getFrom(amount < 0.03 ? uv : (floor(uv * cells) + 0.5) / cells); }`,
+  p_glitch: `void main() { vec2 bl = floor(uv * vec2(6.0, 22.0)); float r = rnd(bl + floor(time * 12.0));
+    vec2 off = vec2((r - 0.5) * 0.2 * amount * step(0.6, r), 0.0); float sh = 0.018 * amount;
+    gl_FragColor = vec4(getFrom(uv + off + vec2(sh, 0.0)).r, getFrom(uv + off).g, getFrom(uv + off - vec2(sh, 0.0)).b, 1.0); }`,
   p_clone: `void main() { float n = 1.0 + floor(amount * 2.99); vec2 f = fract(uv * n);
     float edge = n > 1.0 ? smoothstep(0.0, 0.012 * n, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))) : 1.0;
     gl_FragColor = vec4(getFrom(f).rgb * edge, 1.0); }`,
@@ -965,12 +973,14 @@ const glfx = (() => {
 // Beat-driven strength for post effects: 1 on the beat, fading out; `every` = only every Nth beat.
 const beatPulse = (t, beat, every = 1, decay = 6) => Math.floor(t / beat + 1e-6) % every ? 0 : Math.exp(-(t % beat) * decay);
 function applyPost(ctx, anim, t, beat) {
-  const amt = anim.post === 'wave' ? 1 : anim.post === 'kaleido' ? .9 * beatPulse(t, beat, 1, 5)
-    : anim.post === 'radial' ? beatPulse(t, beat, 1, 7) : anim.post === 'pixel' ? .75 * beatPulse(t, beat, 2, 8)
-    : anim.post === 'clone' ? beatPulse(t, beat, 2, 4) : 0;
-  if (amt < .02 && anim.post !== 'wave') return;
-  const out = glfx.run('p_' + anim.post, ctx.canvas, null, { time: t, amount: amt });
-  if (out) ctx.drawImage(out, 0, 0, ctx.canvas.width, ctx.canvas.height);
+  for (const post of anim.posts || [anim.post]) {
+    const amt = post === 'wave' ? 1 : post === 'kaleido' ? .9 * beatPulse(t, beat, 1, 5)
+      : post === 'radial' ? beatPulse(t, beat, 1, 7) : post === 'pixel' ? .75 * beatPulse(t, beat, 2, 8)
+      : post === 'clone' ? beatPulse(t, beat, 2, 4) : post === 'glitch' ? beatPulse(t, beat, 1, 9) : 0;
+    if (amt < .02 && post !== 'wave') continue;
+    const out = glfx.run('p_' + post, ctx.canvas, null, { time: t, amount: amt });
+    if (out) ctx.drawImage(out, 0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
 }
 
 /* freeze flash: the picture freezes with a camera flash and becomes a printed photo */
@@ -1312,7 +1322,7 @@ function renderReel(ctx, t, plan) {
     } else drawReelPhoto(ctx, slots[i], i, prog(i), W, H, anim, pulse);
     ctx.restore();
   }
-  if (anim.post && t < main) applyPost(ctx, anim, t, beat);
+  if ((anim.post || anim.posts?.length) && t < main) applyPost(ctx, anim, t, beat);
   if (anim.beatFlash && t < main) { const k = Math.floor(t / beat + 1e-6) % 4 ? .5 : 1, a = anim.beatFlash * k * Math.exp(-(t % beat) * 12); if (a > .01) { ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, H); } }
   if (anim.leaks) lightLeak(ctx, W, H, .5, (t * .07) % 1.2);
   if (anim.dust) dust(ctx, W, H, t);
@@ -1368,7 +1378,7 @@ const TRACKS = {
 // Which generated track "Auto" uses for each animation.
 const AUTO_TRACK = { dump: 'house', ramp: 'trap', beatzoom: 'trap', dinamic: 'house', glitch: 'house', card3d: 'pop', coverflow: 'pop', film: 'lofi', split: 'pop',
   vhs: 'lofi', polaroid: 'vara', scrapbook: 'vara', cinematic: 'cinematic', focus: 'lofi', phone: 'pop', letters: 'pop', grid: 'vara',
-  liquid: 'lofi', swirl: 'house', pixel: 'trap', kaleido: 'house', lens: 'trap', clone: 'house', mirror: 'pop', freeze: 'pop', splitscreen: 'pop',
+  liquid: 'lofi', swirl: 'house', pixel: 'trap', kaleido: 'house', lens: 'trap', clone: 'house', mirror: 'pop', freeze: 'pop', splitscreen: 'pop', vcustom: 'house',
   vmix: 'house', vzoomin: 'trap', vzoomout: 'pop', vwhip: 'house', vwhipv: 'trap', vspin: 'house', vcube: 'pop', vstretch: 'trap', vslide: 'vara', vblur: 'lofi', vflash: 'house', vshake: 'trap' };
 let musicKey = 'auto', ownSong = null; // ownSong: { name, buffer, bpm, offset, start }
 const curTrackKey = () => musicKey === 'auto' ? AUTO_TRACK[curAnimKey()] || 'pop' : musicKey;
@@ -1786,6 +1796,60 @@ function renderAnimChips() {
     b.onclick = () => pickAnim(k);
     grid.append(b);
   });
+  if (animTab === 'Tranziții video') grid.append(videoBuilder());
+}
+
+/* ---------- the user's own mix of video transitions and beat effects ---------- */
+const VTRANS = [['zoomin', 'Zoom in', ['czoomin']], ['zoomout', 'Zoom out', ['czoomout']], ['whip', 'Whip stânga-dreapta', ['cwhipl', 'cwhipr']],
+  ['whipv', 'Whip sus-jos', ['cwhipu', 'cwhipd']], ['spin', 'Rotire 360°', ['cspin']], ['cube', 'Cub 3D', ['ccube']], ['stretch', 'Întindere', ['cstretch']],
+  ['slide', 'Glisare cu arc', ['cslide']], ['blur', 'Blur', ['cblur']], ['flash', 'Flash alb', ['cflash']], ['shake', 'Shake', ['cshake']], ['glitch', 'Glitch', ['glitchgl']]];
+const VFX = [['zoom', 'Zoom pe beat'], ['shake', 'Tremurat'], ['flash', 'Flash alb pe beat'], ['speed', 'Blur de viteză'], ['glitch', 'Glitch pe beat'], ['pixel', 'Pixeli'], ['wave', 'Val'], ['clone', 'Multiplicare']];
+// What a pack (preset) contains, as chip selections; the chips start from the pack you are on.
+function packToSel(a) {
+  const posts = a.posts || (a.post ? [a.post] : []);
+  return {
+    trans: VTRANS.filter(([, , ts]) => ts.every(x => a.trans?.includes(x))).map(([k]) => k),
+    fx: [a.pulse >= .06 && 'zoom', a.beatShake >= .015 && 'shake', a.beatFlash >= .3 && 'flash', posts.includes('radial') && 'speed',
+      posts.includes('glitch') && 'glitch', posts.includes('pixel') && 'pixel', posts.includes('wave') && 'wave', posts.includes('clone') && 'clone'].filter(Boolean),
+  };
+}
+function selToPack(sel) {
+  const has = k => sel.fx.includes(k), trans = sel.trans.flatMap(k => VTRANS.find(v => v[0] === k)[2]);
+  Object.assign(ANIMS.vcustom, {
+    trans: trans.length ? trans : ['cut'], T: sel.trans.includes('cube') ? .65 : .55,
+    pulse: has('zoom') ? .09 : .02, beatShake: has('shake') ? .03 : 0, beatFlash: has('flash') ? .4 : 0,
+    posts: [has('speed') && 'radial', has('glitch') && 'glitch', has('pixel') && 'pixel', has('wave') && 'wave', has('clone') && 'clone'].filter(Boolean),
+  });
+  ANIMS.vcustom.post = undefined;
+}
+let vsel = null;
+try { vsel = JSON.parse(localStorage.getItem('cr_vsel') || 'null'); } catch {}
+if (vsel) selToPack(vsel);
+function videoBuilder() {
+  const box = document.createElement('div'); box.className = 'vbuild';
+  const sel = animKey === 'vcustom' && vsel ? vsel : packToSel(ANIMS[ANIMS[curAnimKey()]?.cutClips ? curAnimKey() : 'vmix']);
+  const row = (title, items, list) => {
+    const l = document.createElement('div'); l.className = 'lbl'; l.textContent = title;
+    const c = document.createElement('div'); c.className = 'chips';
+    items.forEach(([k, label]) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; const on = sel[list].includes(k);
+      b.textContent = (on ? '✓ ' : '+ ') + label; b.setAttribute('aria-pressed', String(on));
+      b.onclick = () => {
+        const next = { trans: [...sel.trans], fx: [...sel.fx] };
+        next[list] = on ? next[list].filter(x => x !== k) : [...next[list], k];
+        vsel = next; selToPack(vsel); try { localStorage.setItem('cr_vsel', JSON.stringify(vsel)); } catch {}
+        animKey = 'vcustom'; renderAnimChips(); stopReel(); scheduleRender();
+      };
+      c.append(b);
+    });
+    box.append(l, c);
+  };
+  const head = document.createElement('div'); head.className = 'autonote'; head.style.background = 'var(--surface)';
+  head.textContent = 'Alege tu: apasă ca să adaugi (+) sau să scoți (✓). Pornești de la pachetul selectat mai sus.';
+  box.append(head);
+  row('Tranziții la tăieturi (se schimbă pe rând)', VTRANS, 'trans');
+  row('Efecte pe beat, cât rulează video-ul', VFX, 'fx');
+  return box;
 }
 function pickAnim(k) {
   animKey = k; renderAnimChips(); stopReel(); scheduleRender();
