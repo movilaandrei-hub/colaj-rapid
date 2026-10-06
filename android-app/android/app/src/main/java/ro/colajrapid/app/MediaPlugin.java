@@ -27,14 +27,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Saves generated pictures/videos into the phone's gallery (album "Colaj Rapid")
+ * Saves generated pictures/videos into the phone's gallery (album "Boomly")
  * and opens the Android share sheet (Instagram, WhatsApp, TikTok...).
  * Files arrive from the web page as base64 strings.
  */
 @CapacitorPlugin(name = "Media")
 public class MediaPlugin extends Plugin {
 
-    private static final String ALBUM = "Colaj Rapid";
+    private static final String ALBUM = "Boomly";
 
     @PluginMethod
     public void saveToGallery(PluginCall call) {

@@ -1,4 +1,4 @@
-<title>Colaj Rapid</title>
+<title>Boomly</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Manrope:wght@300;400;600;800&family=Playfair+Display:ital,wght@1,600&family=Special+Elite&display=swap">
@@ -107,7 +107,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 
 <div class="wrap">
   <header>
-    <h1>Colaj<span>.</span>Rapid</h1>
+    <h1>Boom<span>ly</span></h1>
     <div class="tag">Faci pozele. Restul e automat.</div>
   </header>
 
@@ -1876,7 +1876,7 @@ function downloadBlob(filename, blob) {
 const canShareFiles = () => { if (NATIVE) return true; try { return !IN_ARTIFACT && !!navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.jpg', { type: 'image/jpeg' })] }); } catch { return false; } };
 async function saveFile(filename, blob, quiet = false) {
   if (NATIVE) {
-    try { await Capacitor.Plugins.Media.saveToGallery(await nativeFile(filename, blob)); if (!quiet) toast('Salvat în Galerie, în albumul „Colaj Rapid”.'); return true; }
+    try { await Capacitor.Plugins.Media.saveToGallery(await nativeFile(filename, blob)); if (!quiet) toast('Salvat în Galerie, în albumul „Boomly”.'); return true; }
     catch (e) { toast('Nu am putut salva în Galerie: ' + (e?.message || 'eroare')); return false; }
   }
   if (!IN_ARTIFACT) { downloadBlob(filename, blob); toast('Salvat în Descărcări. Îl găsești și în Galerie.'); return true; }
@@ -1895,7 +1895,7 @@ async function doSave() {
   if (tab === 'carusel') {
     if (NATIVE) {
       let ok = 0; for (let i = 0; i < slideBlobs.length; i++) if (await saveFile(`${name}-${String(i + 1).padStart(2, '0')}.jpg`, slideBlobs[i], true)) ok++;
-      if (ok) toast(`${ok} imagini salvate în Galerie, în albumul „Colaj Rapid”.`); return ok > 0;
+      if (ok) toast(`${ok} imagini salvate în Galerie, în albumul „Boomly”.`); return ok > 0;
     }
     if (!IN_ARTIFACT) { // separate pictures go straight to the gallery
       for (let i = 0; i < slideBlobs.length; i++) { downloadBlob(`${name}-${String(i + 1).padStart(2, '0')}.jpg`, slideBlobs[i]); await new Promise(r => setTimeout(r, 350)); }

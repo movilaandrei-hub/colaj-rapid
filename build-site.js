@@ -31,8 +31,8 @@ if ('serviceWorker' in navigator) addEventListener('load', () => navigator.servi
 fs.writeFileSync(path.join(out, 'index.html'), head + app + tail);
 
 fs.writeFileSync(path.join(out, 'manifest.webmanifest'), JSON.stringify({
-  name: 'Colaj Rapid',
-  short_name: 'Colaj Rapid',
+  name: 'Boomly',
+  short_name: 'Boomly',
   description: 'Faci pozele, aplicația face colajul, caruselul sau Reel-ul animat.',
   lang: 'ro',
   start_url: './',

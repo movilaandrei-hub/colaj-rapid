@@ -2,7 +2,7 @@
   "name": "colaj-rapid-android",
   "private": true,
   "version": "1.0.0",
-  "description": "Colaj Rapid packaged as an Android app with Capacitor",
+  "description": "Boomly packaged as an Android app with Capacitor",
   "scripts": {
     "sync": "node ../build-site.js && npx cap sync android"
   },
