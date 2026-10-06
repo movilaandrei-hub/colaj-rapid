@@ -1,0 +1,52 @@
+<!doctype html>
+<!-- Boomly icon generator: open in Chrome, call render(size, mode) — modes: any, maskable, legacy, round, fg, bg. -->
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&display=swap">
+<body style="margin:0;background:#888">
+<script>
+// Boomly icon: gradient tile, yellow comic "boom" burst, big white B with a pop-art shadow, sparks.
+function bg(x, S) {
+  const g = x.createLinearGradient(0, 0, S, S);
+  g.addColorStop(0, '#3A5BFF'); g.addColorStop(.55, '#8B3DFF'); g.addColorStop(1, '#FF3D8B');
+  x.fillStyle = g; x.fillRect(0, 0, S, S);
+  const r = x.createRadialGradient(S * .3, S * .2, 0, S * .3, S * .2, S * .8);
+  r.addColorStop(0, 'rgba(255,255,255,.22)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = r; x.fillRect(0, 0, S, S);
+}
+function art(x, S, k) { // k = content scale (1 = fills the tile)
+  x.save(); x.translate(S / 2, S / 2); x.scale(k * S / 1000, k * S / 1000);
+  // burst
+  const pts = 14; x.beginPath();
+  for (let i = 0; i < pts * 2; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / pts + .1, r = i % 2 ? 250 : 400 + (i % 4 === 0 ? 30 : 0);
+    const px = Math.cos(a) * r, py = Math.sin(a) * r; i ? x.lineTo(px, py) : x.moveTo(px, py);
+  }
+  x.closePath(); x.lineJoin = 'round';
+  x.fillStyle = '#FFD23F'; x.fill(); x.lineWidth = 22; x.strokeStyle = '#1B1035'; x.stroke();
+  // sparks
+  x.lineCap = 'round'; x.strokeStyle = '#FFFFFF'; x.lineWidth = 26;
+  for (const [a, r1, r2] of [[-2.35, 430, 480], [-0.75, 440, 492], [2.5, 430, 476], [0.9, 445, 488]]) {
+    x.beginPath(); x.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); x.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); x.stroke();
+  }
+  // B with offset shadow and outline
+  x.font = '800 560px "Bricolage Grotesque"'; x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+  const y = 195, dx = -12;
+  x.fillStyle = '#1B1035'; x.fillText('B', dx + 30, y + 30);
+  x.lineWidth = 26; x.strokeStyle = '#1B1035'; x.strokeText('B', dx, y);
+  x.fillStyle = '#FFFFFF'; x.fillText('B', dx, y);
+  x.restore();
+}
+function render(S, mode) {
+  const c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
+  const tile = (rad) => { x.save(); x.beginPath(); x.roundRect(0, 0, S, S, rad); x.clip(); bg(x, S); x.restore(); };
+  if (mode === 'any') { tile(S * .22); art(x, S, .9); }
+  else if (mode === 'maskable') { bg(x, S); art(x, S, .72); }
+  else if (mode === 'legacy') { const m = S * .04; x.save(); x.translate(m, m); const s = S - 2 * m; x.beginPath(); x.roundRect(0, 0, s, s, s * .2); x.clip(); bg(x, s); art(x, s, .9); x.restore(); }
+  else if (mode === 'round') { x.save(); x.beginPath(); x.arc(S / 2, S / 2, S / 2 - S * .02, 0, 7); x.clip(); bg(x, S); art(x, S, .78); x.restore(); }
+  else if (mode === 'fg') art(x, S, .62);
+  else if (mode === 'bg') bg(x, S);
+  else if (mode === 'splash') { x.fillStyle = '#2E2A6B'; x.fillRect(0, 0, S, S); }
+  return c.toDataURL('image/png');
+}
+window.ready = document.fonts.load('800 100px "Bricolage Grotesque"').then(() => true);
+</script>
