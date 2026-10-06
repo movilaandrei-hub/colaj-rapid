@@ -1,5 +1,5 @@
 // Offline support: the app shell is cached; fonts and the zip library are cached after first use.
-const CACHE = 'colaj-rapid-202610061149';
+const CACHE = 'colaj-rapid-202610061200';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
