@@ -9,3 +9,4 @@ android-app/android/app/build/
 android-app/android/local.properties
 android-app/android/capacitor-cordova-android-plugins/build/
 *.apk
+*.aab
